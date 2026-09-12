@@ -7,7 +7,7 @@
   🖼️ 图像层
     z_image_turbo_t2i        Z-Image-Turbo 文生图.json
     image_edit_longcat       Image Edit (LongCat Image Edit).json   (角色一致性·首选)
-    image_edit_firered       image_firered_image_edit1_1.json       (角色一致性·备选)
+    image_edit_firered       image_firered_image_edit1_1.json       (已弃用 · 图生图一律用 LongCat)
   🎬 视频层
     video_minimax_h3_i2v     video_minimax_h3_i2v.json   ⭐ 首选
     video_minimax_h3_r2v     video_minimax_h3_r2v.json   ⭐ 角色锁定

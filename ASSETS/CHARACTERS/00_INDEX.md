@@ -14,7 +14,7 @@
 | 02 | `02_liu_sicheng` | 刘思成 | 八（1）班学生 · 技术架构师，ComfyUI/图生视频 | 外向、擅长辩论、Ouch 不离口、赢了不嘚瑟 | 8,16,17,18,20,29,32,39,56,66,68,85,97,121,122,125,128,131,132 | `ASSETS/CHARACTERS/02_liu_sicheng/liu_sicheng_hero_v01.png` ✅ 已就位 |
 | 03 | `03_xu_changjing` | 徐畅景 | 八（1）班学生 · 历史考据，场景建模 | 对生人礼貌、对熟人毒舌、说话慢但稳 | 7,11,13,19,25,35,36,53,73,82,95,115,124,129 | `ASSETS/CHARACTERS/03_xu_changjing/xu_changjing_hero_v01.png` ✅ 已就位 |
 | 04 | `04_zhang_shuyang` | 张书扬 | 八（1）班学生 · 数据训练，文本/音频 | 爱出风头、故意问奇怪问题、"科技之星"轻敌惜败 | 5,6,12,14,16,20,24,28,34,62,75,93,102,105,117,119,123,127,131,133 | `ASSETS/CHARACTERS/04_zhang_shuyang/zhang_shuyang_hero_v01.png` ✅ 已就位 |
-| 05 | `05_huang_jiguang` | 黄继光 | 志愿军战士（1952 上甘岭） | 平静、爱笑、把好菜叶分给小战士 | 26,27,29,30,31,33,36,37,40,42,43,45,48,50 | `ASSETS/CHARACTERS/05_huang_jiguang/huang_jiguang_hero_v01.png` ✅ 已就位（＋closeup 近景） |
+| 05 | `05_huang_jiguang` | 黄继光 | 志愿军战士（1952 上甘岭） | 平静、爱笑、把好菜叶分给小战士 | 26,27,29,30,31,33,36,37,40,42,43,45,48,50 | ★ `ASSETS/CHARACTERS/05_huang_jiguang/huang_jiguang_hero_v02.png` ✅ **v02 = 主参考**（1664×2249，已裁掉右下「豆包AI生成」水印；`hero_v01` 带水印仅备查）＋ closeup 近景 |
 | 06 | `06_yuan_longping` | 袁隆平 | 农校教师（1961 安江农校） | 弯腰找稻、汗滴进泥、笑得腼腆 | 55,58,59,60,63,65,67,68,69,70,72,74,76,78 | `ASSETS/CHARACTERS/06_yuan_longping/yuan_longping_hero_v01.png` ✅ 已就位（＋v02 备选） |
 | 07 | `07_zhong_nanshan` | 钟南山 | 呼吸科专家（2020 高铁餐车） | 疲惫、克制、递口罩 | 80,87,88,90,92,94,96,98,99,101,103,104,106,108,109,111 | `ASSETS/CHARACTERS/07_zhong_nanshan/zhong_nanshan_hero_v01.png` ✅ 已就位 |
 

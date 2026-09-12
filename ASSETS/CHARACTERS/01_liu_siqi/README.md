@@ -83,7 +83,7 @@
 | 项 | 值 |
 |----|-----|
 | 造型基串 prompt | 同一位初中女生，黑色中长发扎马尾，细框眼镜，白色短袖 Polo 衫（领口红色装饰），黑色长裤，红领巾<br>ⓘ **由 qwen3.5 读定妆照 v01 得出**；只写可见特征，**不写体型/脸型/年龄** |
-| 工具 | **`image_edit_longcat`**（`image` = `ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_closeup_v02_16x9.png`）｜`image_edit_firered` ⚠️ **暂不可用**（3 次运行全产出纯黑图，见 §6） |
+| 工具 | **`image_edit_longcat`**（`image` = `ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_closeup_v02_16x9.png`）｜🔒 **图生图一律用 LongCat**（2026-09-13 美术方定案）；`image_edit_firered` **本项目弃用**（3 次运行全产出纯黑图，见 §6.5） |
 | 固定 seed | **1101**（镜 15 定版，实测 211 s 出图；**定下后不要改**） |
 | megapixels | **1.5** → 输出 1680×944。⚠️ 默认 1.0 会得到 1360×768，脸同比更小 |
 | ★ 必须写景别 | prompt 必须含"**近景半身，人物占画面高度约三分之二**"。原因：工作流 `KSampler.denoise = 1.0`，**参考图不作为底图**，构图/景别/人物大小 100% 由 prompt 文字决定；不写 → 模型自己拍成中景 → 脸只剩 ~132 px |
@@ -183,6 +183,9 @@ output_dir: OUTPUT/tts
 
 → **静默失败**：工具照常返回 `ok:true` + 文件名。**必须以像素验收**（`np.asarray(im).mean() == 0` 即废）或看体积（正常 ≈1.5 MB）。
 → 目前**不要用 FireRed**；待排查方向：`qwen_image_vae` 与 `CLIPLoader(type=qwen_image)` 的搭配、`CFGNorm`、`ModelSamplingAuraFlow(shift=3.1)`。
+
+> 🔒 **定案（2026-09-13，美术方指示）：本项目图生图一律用 `image_edit_longcat`，FireRed 弃用、不再排查、不做 A/B 比较。**
+> 本项**就此关闭**；上面三条黑图证据仅作历史记录。若日后真要复活 FireRed，再按上面的排查方向走。
 
 ### 6.6 R2V 直出视频（★ 本项目统一路线，I2V 弃用）
 
