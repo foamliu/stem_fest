@@ -276,6 +276,12 @@ stem_fest/
 **⚠️ 强烈建议先做 1 个镜号的端到端小样**（推荐镜 15「你输在轻敌。」，只有刘思齐一人 + 教室傍晚），
 跑通全链路后再批量生产，避免 139 镜做到一半发现流程有问题。
 
+> ★ **当前定版配方（2026-09-12，镜 15 实测通过）**：参考图 = `liu_siqi_closeup_v02_16x9.png`（16:9 单人）｜
+> 工具 `image_edit_longcat`｜`seed 1101` / `megapixels 1.5` / `steps 50` / `cfg 4.5` / `guidance 4.5`｜
+> prompt **必须写死景别**（"近景半身，人物占画面高度约三分之二"）且**不要用文字描述人物长相** →
+> 产物 `frames/mirror015_liu_siqi_v11_refc15_00001_.png`（1680×944，**输出脸高 255 px**，211 s）。
+> 完整规范与踩坑见 `ASSETS/CHARACTERS/01_liu_siqi/README.md` §4 / §6。
+
 > ✅ **小样已完成（2026-09-12）—— 镜 15 全链路跑通**，产物在 `OUTPUT/04_classroom_dusk/`：
 > | 步 | 产物 | 实测规格 | 耗时 |
 > |:-:|------|----------|:----:|
@@ -296,18 +302,29 @@ stem_fest/
 > `frames/mirror015_liu_siqi_v02_00001_.png` 已在后续调试中被清理，`frames/` 目录现仅存下面这批新产物。
 > 需要旧图复核时，请按表中的 seed 重新生成（首帧参数：seed 1101 / megapixels 1.0）。
 >
-> 📌 **镜 15 新尝试（2026-09-12 21:05–21:13，产物已归档、结论待登记）**
+> 📌 **镜 15 定版与实验记录（2026-09-12 21:05–22:20）**
 >
 > | 产物 | 位置 | 说明 | 耗时 |
 > |------|------|------|:----:|
-> | `liu_siqi_closeup_v01.png`（587×330） | `ASSETS/CHARACTERS/01_liu_siqi/` | 从 hero 三视图**正面列裁出**的头肩特写（头顶留白 96 px），用于给图像编辑提供"脸占比更大"的参考图 | — |
-> | `liu_siqi_closeup_v01_16x9.png`（3072×1728） | 同上 | 上述特写**左右补边**成 16:9（不裁原图，两侧各 384 px 拉伸填充） | — |
-> | `frames/mirror015_liu_siqi_v09_userref_00001_.png` | `OUTPUT/04_classroom_dusk/frames/` | LongCat + closeup 参考图试跑 ✅ | 171.1 s |
-> | `frames/mirror015_liu_siqi_v10_userref16x9_00001_.png` | 同上 | LongCat + 16:9 补边参考图试跑 ✅（原落盘在 `E:\code\ComfyUI\output\`，已取回 `OUTPUT/`） | 351.9 s |
+> | **`frames/mirror015_liu_siqi_v11_refc15_00001_.png` ★** | `OUTPUT/04_classroom_dusk/frames/` | **定版首帧**：LongCat + 新参考图 + 近景 prompt + 1.5MP → 1680×944，**输出脸高 255 px** | 211 s |
+> | `liu_siqi_closeup_v01.png`（2304×1728，4:3） | `ASSETS/CHARACTERS/01_liu_siqi/` | 用户提供的**单人**参考图（21:05 入库）；只作裁切源——直接出图会得到 **4:3 输出** | — |
+> | **`liu_siqi_closeup_v02_16x9.png`（2304×1296）★** | 同上 | **定版参考图**：由 v01 **整宽裁切**（裁框 y∈[152,1448]、头顶留 20 px、**无补边伪影**），脸占图高 **45%** | — |
+> | `frames/mirror015_liu_siqi_v09_userref_00001_.png` | 同上 | ❌ 4:3 输出（1184×880），脸 **132 px** | 171 s |
+> | `frames/mirror015_liu_siqi_v10_userref16x9_00001_.png` | 同上 | ❌ 补边参考图（有竖带），脸 **138 px** | 352 s |
+> | `frames/mirror015_liu_siqi_v12_firered15_00001_.png` / `..._v13_firered8_...` | 同上 | ❌ **纯黑图**（FireRed 3/3 失败，见角色卡 §6.5） | 1590 s / — |
 >
-> ⚠️ **"clip 裁头肩 → 补边 16:9 → 当图像编辑参考图"这条方法尚未固化**：
-> 一次性脚本全在被 gitignore 的 `OUTPUT/_diag_*.py` 里，其他 6 位角色若要用需重写。
-> 待办见 §8 P2「固化 tools/」（原 `import_character.py` 计划）。
+> ⚠️ **订正**：本文件早先写的"`liu_siqi_closeup_v01.png`（587×330，三视图正面列裁头肩）"**已过期** ——
+> 那张 587×330 是 20:45 的中间产物，21:05 已被用户提供的 4:3 单人图**覆盖**。
+>
+> 📊 **四条量化结论**（完整推导见 `ASSETS/CHARACTERS/01_liu_siqi/README.md` §6）：
+> · **输出尺寸 = 参考图缩放后的尺寸**（`megapixels` 改不了画幅）⇒ 要 16:9 首帧，参考图必须是 16:9；
+> · **`KSampler.denoise = 1.0` ⇒ 参考图不作为底图**，构图/景别 100% 由 prompt 决定 ⇒ **prompt 必须写死景别**；
+>   输出脸高 ≥250 px 才谈得上"像本人"（v11 之前三版只有 132 / 138 px）；
+> · ⚠️ `image_edit_firered` **静默产出纯黑图**，工具仍返回 `ok:true` ⇒ **验收必须查像素或文件体积**；
+> · ⚠️ 本地 qwen3.5 **不能做"像不像"的 A/B 排序**（位置偏置：正序/倒序结论相反）⇒ 必须人眼定。
+>
+> ⚠️ **"整宽裁 16:9 单人参考图"这条方法尚未固化为工具**：脚本是 `OUTPUT/_diag_*.py`（被 gitignore），
+> 其他 6 位角色要用需重写。待办见 §8 P2 #12。
 
 >
 > ⚠️ **H3 I2V 性能：实测数据（2026-09-12 已做 A/B 对比）**
@@ -376,13 +393,16 @@ stem_fest/
 | 8 | ~~用 `qwen3.5` 核对定妆照~~ | ✅ **已完成 2026-09-12**：9 张全部核对，7 张角色卡的「造型基串 prompt / 服装 / 配饰 / 性别」已填全；并发现修正了「徐畅景眼镜」与分镜的冲突（选了改分镜） |
 | 9 | 补 `ASSETS/配乐提示词规格.md` | `ace_step_t2audio` 的文档引用了它，文件尚不存在 |
 | 10 | 缺失：四人合影参考图 | `CHARACTERS/_group/four_students_hero_v01.png`，四人同框镜头（9/10/22/53/79/113/118/134）需要 |
+| 16 | **镜 15 的视频一步（补完"跑通一个镜头"）** | 用 v11 首帧 `frames/mirror015_liu_siqi_v11_refc15_00001_.png` 跑 `video_minimax_h3_i2v`：`duration 5` / `megapixels 0.6` / **台词与环境音写进 prompt**（不另跑 TTS）。⚠️ 注意 H3 会把 1680×944 降到 1056×608，**脸会同比缩到约 160 px** —— 若"像"的镜头要在成片里成立，需评估是否改用 H3 R2V 直出（少一次重绘） |
+| 17 | ⚠️ 排查 `image_edit_firered` **纯黑图** | **3/3 失败**（40 步与 8 步两条支路都黑，ComfyUI 仍报 success）→ 见 `ASSETS/CHARACTERS/01_liu_siqi/README.md` §6.5；未修好前**不要使用**，且**所有生成都要查像素/体积验收** |
+| 18 | 把镜 15 定版配方推广到其他 6 位角色 | 每位先做一张 **16:9 单人参考图**（整宽裁切，脸占图高 ≥35%）＋ prompt 写死景别＋`megapixels 1.5`；裁切脚本待固化（P2 #12） |
 
 ### P2 — 收尾 / 卫生
 
 | # | 事项 | 备注 |
 |:-:|------|------|
 | 11 | ~~改掉 `comfyui_tools.md` / `comfyui_mcp_server.py` 里的**旧项目示例路径**~~ | ✅ **已完成 2026-09-12**：两处 `ASSETS/CHARACTERS/08_莎拉·赵/主定妆照.png` 已改为本项目路径；同时清理了 `selftest.py` 的旧路径 fixture、`@mcp.tool` docstring 里的 `scripts/generate_ep13_t2i.py` 引用、`mcp_server/README.md` 的旧项目标题。改后 `python mcp_server/selftest.py` **11 项全 PASS** |
-| 12 | 固化 `tools/import_character.py` | 把所有坑写进工具：转 PNG + 像素防呆 + 归一化相似度 + 自动清 ComfyUI 同名旧文件 + 上传校验。**另需**：把上一轮散落在 `OUTPUT/_diag_*.py` 的"三视图裁头肩 → 16:9 补边"脚本一并固化（6 位角色都要用） |
+| 12 | 固化 `tools/import_character.py` | 把所有坑写进工具：转 PNG + 像素防呆 + 归一化相似度 + 自动清 ComfyUI 同名旧文件 + 上传校验。**另需**（2026-09-12 新增）：把"**整宽裁 16:9 单人参考图**"固化为 `tools/make_ref_16x9.py`（参照 `OUTPUT/_diag_ref16x9_crop.py`：以头顶边距定裁窗，不居中、不补边），6 位角色都要用；再加一个"**生成物验收**"脚本（查纯黑/查脸高，参照 `OUTPUT/_diag_v11_facepos.py`） |
 | 13 | 清理 `C:\Users\Administrator\AppData\Local\Temp\vwpkmrz1` | 2.5 GB 的 VS 安装器缓存，安装已完成，可安全删除（C 盘只剩 2 GB） |
 | 14 | 决定是否删 `llava:latest` | 4.7 GB，已证实不可用 |
 | 15 | ~~提交 git~~ | ✅ **已完成 2026-09-12**：`ASSETS/` 目录骨架 + 全部 `.md`、`mcp_server/`、`workflows/` 已入库（此前三者均**完全未跟踪**，误删即失） |
