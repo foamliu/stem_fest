@@ -128,8 +128,8 @@ stem_fest/
 | `z_image_turbo_t2i` | Z-Image-Turbo 文生图 | 场景 / 道具 / UI / 群像（**不保角色一致性**） |
 | `image_edit_longcat` | Image Edit (LongCat) | ★ **角色一致性**：定妆照 → 新场景分镜图（首选） |
 | `image_edit_firered` | image_firered_image_edit1_1 | ★ **角色一致性**：同上，与 LongCat **互为备选**（同一参考图各跑一次，取更像本人的那版） |
-| `video_minimax_h3_i2v` | video_minimax_h3_i2v | ★ 图生视频（含环境音），**视频首选** |
-| `video_minimax_h3_r2v` | video_minimax_h3_r2v | ★ 参考图生视频（≤2 张参考图，角色锁定） |
+| `video_minimax_h3_r2v` | video_minimax_h3_r2v | ★★ **视频首选（本项目唯一入选路线）**：≤2 张参考图（角色 + 场景），角色锁定、只重绘一次 |
+| `video_minimax_h3_i2v` | video_minimax_h3_i2v | ⚠️ **本项目已弃用**（2026-09-12）：身份被重绘两次，且先把 1.5MP 首帧降到 1056×608，脸同比缩水 |
 | `video_minimax_h3_t2v` | video_minimax_h3_t2v | 文生视频（UI 动画 / 无角色镜头） |
 | `qwen3_tts` | Qwen3-TTS | 角色配音 / 旁白 —— ⚠️ **当前流程不用**（台词写进 H3 prompt），仅作备用 |
 | `ace_step_t2audio` | ACE-Step 1.5 | 配乐 BGM / 合成音效 —— ⚠️ 两首主 BGM 用**现成音源**（羽毛主题 /《如愿》），本工具仅用于补充过渡配乐（待定） |
@@ -197,7 +197,7 @@ stem_fest/
 |:-:|------|------|
 | ★0 | ★★ **定妆照 = 外形的唯一权威；prompt 禁止改动外形** | 造型基串**只能写定妆照里客观可见的稳定特征**（性别 / 发型发色 / 服装 / 配饰）。**严禁**写入体型、脸型、胖瘦、年龄感等描述；**严禁**把分镜里的性格/印象描述（如刘思齐"胖胖的"）当作外形依据。<br>**反面案例（2026-09-12）**：镜 15 的 prompt 里写了"圆脸、偏胖"（定妆照实为**瓜子脸、中等体型**），生成结果**比定妆照胖一圈、脸变圆**。详见 `CHARACTERS/01_liu_siqi/README.md` 造型要点 |
 | 1 | **H3 `megapixels` ≤ 0.6** | 16GB VRAM 下 0.92(720p) **必 OOM**；要 1080p 请生成后超分 |
-| 2 | H3 R2V 最多 **2 张**参考图 | 四人同框放不下 → 先用 `image_edit_longcat` 拼一张合影参考图，再喂 I2V |
+| 2 | H3 R2V 最多 **2 张**参考图 | 四人同框放不下 → 先用 `image_edit_longcat` 拼一张合影参考图，再喂 R2V |
 | 3 | TTS `custom_speaker_name` **必须为空** | ⚠️ **仅在使用 `qwen3_tts` 时适用**（当前流程不用 TTS，片段音频写进 H3 prompt）。该字段是音色 mixing 列表，填自定义名 → `ValueError` |
 | 4 | 若用 TTS：同角色固定 `speaker` + `seed` | 跨镜头音色一致性的唯一手段 |
 | 5 | **角色镜头必须引用定妆照** | 否则每张脸随机变化，定妆照白做 |
@@ -238,25 +238,37 @@ stem_fest/
         ↓
 ② 出分镜图（首帧）
    · 有角色 → image_edit_longcat
-              image = ASSETS/CHARACTERS/<角色>/<slug>_hero_v01.png
-              prompt = 造型基串 + 场景 + 表情动作 + 景别 + **风格后缀**（见 `ASSETS/STYLE/README.md`）
+              image = ASSETS/CHARACTERS/<角色>/<slug>_closeup_v02_16x9.png（**16:9 单人参考图**）
+                      ⚠️ 不要用三视图 hero：整图缩到 1MP 后单人脸只剩 ~112 px，实测"不像本人"
+              prompt = **景别（必须写死！）** + 场景 + 表情动作 + 风格后缀
+                       ⚠️ **不要用文字描述人物长相**（外形一律由参考图承载）
               seed   = 角色卡里的固定 seed（首次生成后回填，之后永不改）
+              megapixels = **1.5**（→ 1680×944）
    · 无角色（场景/道具/群像）→ z_image_turbo_t2i
    output_dir = OUTPUT/<段落>/frames
+   ★ 验收：输出画面**脸高 ≥ 250 px**（位置法量，见 §7 末）
         ↓
 ③ 出视频 ★（音频在这一步就生成了，不要另做配音）
-   · 有角色 → video_minimax_h3_i2v（首帧 = ②的图）
-              prompt 写明 SHOT 段落 + 运动 + **Audio**（环境音 + 台词）
-              duration = 该镜时长；megapixels ≤ 0.6
+   · **有角色 → video_minimax_h3_r2v（★ 本项目唯一入选路线，2026-09-12 定案）**
+              ref_image_1 = 该角色的 16:9 单人参考图      → prompt 里写 `<Picture 1>`
+              ref_image_2 = 该镜的场景图（ASSETS/SCENES/…）→ prompt 里写 `<Picture 2>`
+              prompt = `CUT 1:` 分段写明 景别 + 动作 + **Audio**（环境音 + 台词原文）
+              duration = 该镜时长；megapixels ≤ 0.6（R2V 双参考图更吃显存，默认 0.4）
    · 无角色动态 → video_minimax_h3_t2v
-   · 需锁角色多镜头 → video_minimax_h3_r2v（≤2 张参考图）
+   · ~~video_minimax_h3_i2v（先出首帧、再拿首帧跑 I2V）~~ ❌ **已弃用（2026-09-12）**：
+     身份被重绘两次，且 H3 会把 1.5MP 首帧再降到 1056×608（脸同比缩水）；
+     R2V 一步到位、只重绘一次，参考图也不必是 16:9。
    output_dir = OUTPUT/<段落>/video
         ↓
 ④ 音频（★ 只有两层，**不要对每个镜号单独跑 TTS**）
-   · 片段内音频 = 环境音 + 角色台词
+   · 片段内音频 = 角色台词 + 环境音
      → **直接写进 H3 的 prompt**，例：
         "Audio: 教室安静底噪、窗外细弱蝉鸣；她冷淡地说：你输在轻敌。"
      → H3 音画联合生成，天然同步
+     ⚠️ **实测（镜 15 R2V，2026-09-12）**：H3 **只把台词念出来了**，prompt 里的环境音基本没生成 ——
+        每 0.5 s 的 RMS 为 [0.003, 0.005, 0.004, 0.004, 0.003, **0.237, 0.324, 0.249**, 0.002, 0.003]：
+        只有第 2.5–4.0 s 有说话包络，其余 ≈ −50 dB（等于静音）。
+        ⇒ **环境音要另做**（`ace_step_t2audio` 或现成音效），并在剪辑时与台词对齐（本镜台词落在 2.5–4.0 s）。
    · 跨镜头的背景音乐（BGM）= **使用现成音源**，后期铺在整段上：
      · 序幕（镜 1-9）：**Forrest Gump Suite (Feather Theme)** / Alan Silvestri
      · 尾声（镜 136-139）：**《如愿》** / 王菲（词 唐恬、曲 钱雷）
@@ -280,7 +292,12 @@ stem_fest/
 > 工具 `image_edit_longcat`｜`seed 1101` / `megapixels 1.5` / `steps 50` / `cfg 4.5` / `guidance 4.5`｜
 > prompt **必须写死景别**（"近景半身，人物占画面高度约三分之二"）且**不要用文字描述人物长相** →
 > 产物 `frames/mirror015_liu_siqi_v11_refc15_00001_.png`（1680×944，**输出脸高 255 px**，211 s）。
-> 完整规范与踩坑见 `ASSETS/CHARACTERS/01_liu_siqi/README.md` §4 / §6。
+>
+> ★ **视频步也用 R2V（本项目统一路线，I2V 弃用）**：`video_minimax_h3_r2v`｜
+> `ref_image_1` = 上面这张定版参考图（→ `<Picture 1>`）｜`ref_image_2` = `ASSETS/SCENES/04_classroom_dusk/classroom_dusk_wide_v01.png`（→ `<Picture 2>`）｜
+> prompt 用 `CUT 1:` 写 景别+动作+**Audio（含台词原文）**｜`seed 1101` / `megapixels 0.6` / `steps 4` →
+> 产物 `video/mirror015_liu_siqi_r2v_00001_.mp4`（1056×608@24fps，5.17 s，AAC 32 kHz 立体声，**199 s**）。
+> 完整规范与踩坑见 `ASSETS/CHARACTERS/01_liu_siqi/README.md` §4 / §5 / §6。
 
 > ✅ **小样已完成（2026-09-12）—— 镜 15 全链路跑通**，产物在 `OUTPUT/04_classroom_dusk/`：
 > | 步 | 产物 | 实测规格 | 耗时 |
@@ -327,7 +344,7 @@ stem_fest/
 > 其他 6 位角色要用需重写。待办见 §8 P2 #12。
 
 >
-> ⚠️ **H3 I2V 性能：实测数据（2026-09-12 已做 A/B 对比）**
+> ⚠️ **H3 性能实测（2026-09-12 A/B；I2V 已弃用，但「步数 ↔ 耗时」模型对 R2V 同样适用）**
 >
 > | # | 配置 | 分辨率 | 精确耗时 | 每步 |
 > |:-:|---|:--:|:--:|:--:|
@@ -393,7 +410,7 @@ stem_fest/
 | 8 | ~~用 `qwen3.5` 核对定妆照~~ | ✅ **已完成 2026-09-12**：9 张全部核对，7 张角色卡的「造型基串 prompt / 服装 / 配饰 / 性别」已填全；并发现修正了「徐畅景眼镜」与分镜的冲突（选了改分镜） |
 | 9 | 补 `ASSETS/配乐提示词规格.md` | `ace_step_t2audio` 的文档引用了它，文件尚不存在 |
 | 10 | 缺失：四人合影参考图 | `CHARACTERS/_group/four_students_hero_v01.png`，四人同框镜头（9/10/22/53/79/113/118/134）需要 |
-| 16 | **镜 15 的视频一步（补完"跑通一个镜头"）** | 用 v11 首帧 `frames/mirror015_liu_siqi_v11_refc15_00001_.png` 跑 `video_minimax_h3_i2v`：`duration 5` / `megapixels 0.6` / **台词与环境音写进 prompt**（不另跑 TTS）。⚠️ 注意 H3 会把 1680×944 降到 1056×608，**脸会同比缩到约 160 px** —— 若"像"的镜头要在成片里成立，需评估是否改用 H3 R2V 直出（少一次重绘） |
+| 16 | ~~镜 15 的视频一步~~ | ✅ **已完成 2026-09-12**：改走 **H3 R2V**（本项目今后统一路线，I2V 弃用）→ `video/mirror015_liu_siqi_r2v_00001_.mp4`（1056×608@24fps，5.17 s，AAC 32 kHz 立体声，**199 s**）。参考图 = 定版 16:9 单人图 + `04_classroom_dusk` 场景图；台词写进 prompt。⚠️ 待**人耳**确认台词是否真的念出、音色是否合适（本地无 ASR） |
 | 17 | ⚠️ 排查 `image_edit_firered` **纯黑图** | **3/3 失败**（40 步与 8 步两条支路都黑，ComfyUI 仍报 success）→ 见 `ASSETS/CHARACTERS/01_liu_siqi/README.md` §6.5；未修好前**不要使用**，且**所有生成都要查像素/体积验收** |
 | 18 | 把镜 15 定版配方推广到其他 6 位角色 | 每位先做一张 **16:9 单人参考图**（整宽裁切，脸占图高 ≥35%）＋ prompt 写死景别＋`megapixels 1.5`；裁切脚本待固化（P2 #12） |
 

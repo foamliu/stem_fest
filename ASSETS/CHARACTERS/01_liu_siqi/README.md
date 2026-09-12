@@ -114,12 +114,23 @@ guidance: 4.5
 output_dir: OUTPUT/04_classroom_dusk/frames
 # 产物：mirror015_liu_siqi_v11_refc15_00001_.png（1680×944，实测脸高 255 px）
 
-# ② 分镜图 → 视频（镜 15，图生视频）
-tool: video_minimax_h3_i2v
-image: OUTPUT/04_classroom_dusk/frames/<上一步产物>.png
-prompt: SHOT 1: 中景，她头也不抬地说了一句冷淡的话。Audio: 教室底噪、全息设备低频嗡鸣
+# ② 出视频（★ 本项目统一用 R2V，不用 I2V；音频在这一步就生成）
+tool: video_minimax_h3_r2v
+ref_image_1: ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_closeup_v02_16x9.png   # → prompt 里写 <Picture 1>
+ref_image_2: ASSETS/SCENES/04_classroom_dusk/classroom_dusk_wide_v01.png   # → prompt 里写 <Picture 2>
+prompt: |
+  CUT 1: 近景半身。<Picture 1> 中的这位初中女生坐在傍晚的教室里，环境与光线参考 <Picture 2>：
+  暖金色天光从窗外斜照进来，室内有淡淡蓝紫色冷光反光，课桌椅整齐。
+  动作：她原本低头看着桌面，随后缓缓抬眼看向对面（镜头方向略偏），表情平静冷淡、不躲不缩；
+  说出一句话后视线收回、轻微抿嘴。
+  Audio: 教室安静底噪、窗外细弱蝉鸣、远处操场隐约人声；她语气冷淡、音量低、停顿多地说："你输在轻敌。"
 duration: 5
-megapixels: 0.6
+seed: 1101
+aspect_ratio: 16:9 (Widescreen)
+megapixels: 0.6      # 实测输出 1056x608@24fps + AAC 32kHz 立体声（199 s）
+output_dir: OUTPUT/04_classroom_dusk/video
+# 产物：mirror015_liu_siqi_r2v_00001_.mp4（5.17 s）
+# ⚠️ 台词是否真的念出来、音色是否合适，本地无 ASR，只能靠耳朵听
 
 # ③ 配音
 tool: qwen3_tts
@@ -173,7 +184,39 @@ output_dir: OUTPUT/tts
 → **静默失败**：工具照常返回 `ok:true` + 文件名。**必须以像素验收**（`np.asarray(im).mean() == 0` 即废）或看体积（正常 ≈1.5 MB）。
 → 目前**不要用 FireRed**；待排查方向：`qwen_image_vae` 与 `CLIPLoader(type=qwen_image)` 的搭配、`CFGNorm`、`ModelSamplingAuraFlow(shift=3.1)`。
 
-### 6.6 本地视觉模型（qwen3.5）不能做"像不像"的二选一
+### 6.6 R2V 直出视频（★ 本项目统一路线，I2V 弃用）
+
+镜 15 实测（`video_minimax_h3_r2v`：`ref_image_1` = 定版 16:9 单人图、`ref_image_2` = `04_classroom_dusk` 场景图；
+`seed 1101` / `megapixels 0.6` / `steps 4` / `duration 5` → **199 s**）：
+
+| 环节 | 尺寸 | 输出画面脸高 |
+|---|---|---|
+| 参考图（定版 16:9 单人） | 2304×1296 | 441 px（原图） |
+| LongCat 首帧 v11 | 1680×944 | 302 px |
+| **R2V 视频帧（第 1 秒 / 第 3.5 秒）** | 1056×608 | **225 px / 219 px** |
+
+- 对比 I2V 路线（先把 1680×944 首帧降到 1056×608，脸缩到 ≈160 px）⇒ **R2V 在成片里脸大 ~40%**，且身份只被重绘一次。
+- 描述式核查（第 1 秒帧）与参考图**逐项一致**：近景 / 内双 / 眼睛中等 / 眼距适中 / 鼻梁中等 / 鼻头圆润 / 唇厚中等 / 嘴角平直 / 戴眼镜 + 马尾 / 单人 / 照片写实质感。
+  （未出现前几版那种"眼距变宽、鼻梁挺直、脸偏瘦"的系统性偏离。）**最终"像不像"仍须人眼判断。**
+
+**音轨实测**（ffmpeg 解码成 16 kHz 单声道后算 RMS）：
+
+| 指标 | 值 |
+|---|---|
+| 整段 | RMS 0.1495 / peak 0.94 / 5.18 s |
+| 每 0.5 s RMS | `[0.003, 0.005, 0.004, 0.004, 0.003, **0.237, 0.324, 0.249**, 0.002, 0.003]` |
+
+- ✅ **第 2.5–4.0 s 有明显的"说话"包络 ⇒ 台词确实生成出声了**（词句是否正确本地无 ASR，只能人耳听）。
+- ⚠️ 前后段仅 0.003–0.005（≈ −50 dB）⇒ prompt 里写的"教室底噪 / 窗外蝉鸣 / 远处人声"**基本没生成**，
+  **环境音需后期补**（`ace_step_t2audio` 或现成音效），别指望 H3 把环境音做足。
+
+### 6.7 分镜图还需要吗？（R2V 路线下的定位变化）
+
+R2V 直接从**参考图 + 场景图**出视频，不再依赖"先出一张首帧"。因此 `image_edit_longcat` 的分镜图**从"必需中间步"降级为"可选预览"**：
+- 仍推荐先出图，因为**出图只要 211 s、视频要 199 s 起且更贵**，出图用来快速确认"像不像 / 景别对不对"更划算；
+- 若定型后直接批量出视频，可以跳过出图步（但记得先按 §6.3 验收参考图）。
+
+### 6.8 本地视觉模型（qwen3.5）不能做"像不像"的二选一
 
 `OUTPUT/_vision_report3.txt`：正序二选一选 **v07**（三视图为参考），倒序二选一选 **v08**（头肩裁切为参考）——**同一问题换个顺序结论就相反**（位置偏置）。
 

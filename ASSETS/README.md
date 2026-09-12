@@ -59,7 +59,7 @@
 |----|------|-----------------|
 | `CHARACTERS/` | **角色一致性唯一依据**（LESSONS #6：角色镜头必须引用定妆照，否则每张脸随机变化） | `image_edit_longcat` / `video_minimax_h3_r2v` |
 | `SCENES/` | 环境、光线、构图参考（不需保角色） | `z_image_turbo_t2i` / `video_minimax_h3_t2v` |
-| `PROPS/` | 纸飞机、稻谷、口罩等特写道具 | `z_image_turbo_t2i` → `video_minimax_h3_i2v` |
+| `PROPS/` | 纸飞机、稻谷、口罩等特写道具 | `z_image_turbo_t2i` → `video_minimax_h3_r2v`（以道具图为参考） |
 | `STYLE/` | 全片画风锚点（**超写实真人质感**、色调 LUT） | 作为 prompt 参考文字/图；**出图必须带风格后缀** |
 
 ## 2. 命名硬规则（全 ASCII）
@@ -138,7 +138,7 @@ megapixels  = 0.4   (16GB VRAM 下勿超 0.6)
 ```
 
 四人同框（>2 人）R2V 放不下 → 先用 `image_edit_longcat` 逐人拼一张**合影参考图**
-（存 `CHARACTERS/_group/`），再喂给 I2V。
+（存 `CHARACTERS/_group/`），再喂给 R2V。
 
 > ⚠️ **ComfyUI 上传不覆盖同名文件**（实测 2026-09-12）：若 `input/` 里已存在同名文件，
 > `comfyui_upload_image` 不会覆盖，而是存成 `名字 (1).png`、`名字 (2).png`…
