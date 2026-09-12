@@ -1,0 +1,224 @@
+{
+  "177": {
+    "inputs": {
+      "image": "ComfyUI_temp_sktlx_00009_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "178": {
+    "inputs": {
+      "images": [
+        "176:36",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "176:26": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "176:27": {
+    "inputs": {
+      "prompt": "美女变帅哥",
+      "clip": [
+        "176:38",
+        0
+      ],
+      "vae": [
+        "176:26",
+        0
+      ],
+      "image": [
+        "176:37",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEdit",
+    "_meta": {
+      "title": "文本编码（QwenImageEdit）"
+    }
+  },
+  "176:28": {
+    "inputs": {
+      "prompt": "",
+      "clip": [
+        "176:38",
+        0
+      ],
+      "vae": [
+        "176:26",
+        0
+      ],
+      "image": [
+        "176:37",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImageEdit",
+    "_meta": {
+      "title": "文本编码（QwenImageEdit）"
+    }
+  },
+  "176:29": {
+    "inputs": {
+      "reference_latents_method": "index",
+      "conditioning": [
+        "176:31",
+        0
+      ]
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "FluxKontext多参考潜在方法"
+    }
+  },
+  "176:30": {
+    "inputs": {
+      "guidance": 4.5,
+      "conditioning": [
+        "176:28",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "Flux引导"
+    }
+  },
+  "176:31": {
+    "inputs": {
+      "guidance": 4.5,
+      "conditioning": [
+        "176:27",
+        0
+      ]
+    },
+    "class_type": "FluxGuidance",
+    "_meta": {
+      "title": "Flux引导"
+    }
+  },
+  "176:32": {
+    "inputs": {
+      "reference_latents_method": "index",
+      "conditioning": [
+        "176:30",
+        0
+      ]
+    },
+    "class_type": "FluxKontextMultiReferenceLatentMethod",
+    "_meta": {
+      "title": "FluxKontext多参考潜在方法"
+    }
+  },
+  "176:33": {
+    "inputs": {
+      "seed": 43,
+      "steps": 50,
+      "cfg": 4.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "176:34",
+        0
+      ],
+      "positive": [
+        "176:29",
+        0
+      ],
+      "negative": [
+        "176:32",
+        0
+      ],
+      "latent_image": [
+        "176:35",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  },
+  "176:34": {
+    "inputs": {
+      "unet_name": "longcat_image_edit_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "176:35": {
+    "inputs": {
+      "pixels": [
+        "176:37",
+        0
+      ],
+      "vae": [
+        "176:26",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE编码"
+    }
+  },
+  "176:36": {
+    "inputs": {
+      "samples": [
+        "176:33",
+        0
+      ],
+      "vae": [
+        "176:26",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "176:37": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "megapixels": 1,
+      "resolution_steps": 16,
+      "image": [
+        "177",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "176:38": {
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "longcat_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  }
+}

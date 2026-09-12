@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""MCP 服务器离线自检 —— 不需要 ComfyUI 在线。
+
+校验两件事：
+  1. 11 个工具均已注册到 FastMCP（8 条工作流 + 3 个辅助工具）
+  2. 每条工作流的参数注入落到了正确的节点上（拦截 `_queue` 检查提交的 workflow）
+
+用法::
+
+    python mcp_server/selftest.py
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+SERVER = Path(__file__).resolve().parent / "comfyui_mcp_server.py"
+
+spec = importlib.util.spec_from_file_location("comfyui_mcp_server", SERVER)
+srv = importlib.util.module_from_spec(spec)
+sys.modules["comfyui_mcp_server"] = srv
+spec.loader.exec_module(srv)
+
+CAPTURED: dict = {}
+FAILURES: list[str] = []
+
+
+def _check(label: str, cond: bool, detail: str = "") -> None:
+    mark = "PASS" if cond else "FAIL"
+    print(f"  [{mark}] {label}" + (f"  -> {detail}" if detail and not cond else ""))
+    if not cond:
+        FAILURES.append(label)
+
+
+# ── 拦截 ComfyUI 调用（离线跑通注入逻辑）─────────────────────────
+def _fake_queue(wf: dict) -> str:
+    CAPTURED["wf"] = wf
+    return "offline-test-prompt-id"
+
+
+srv._queue = _fake_queue
+srv._wait = lambda pid, timeout: {"outputs": {}}                    # noqa: E731
+srv._save_outputs = lambda entry, out_dir: []                      # noqa: E731
+srv._upload_image = lambda p, target_name=None: "ref_test.png"     # noqa: E731
+
+
+def call(fn, **kwargs) -> tuple[dict, dict]:
+    CAPTURED.clear()
+    result = json.loads(fn(**kwargs))
+    return result, CAPTURED.get("wf", {})
+
+
+def inputs_of(wf: dict, class_type: str) -> list[dict]:
+    return [n["inputs"] for n in wf.values() if n.get("class_type") == class_type]
+
+
+def main() -> int:
+    print("=" * 68)
+    print(" ComfyUI MCP Server 自检（离线，不依赖 ComfyUI 服务）")
+    print("=" * 68)
+
+    # 1. 工具注册
+    print("\n[1] 工具注册")
+    tools = sorted(t.name for t in srv.mcp._tool_manager.list_tools())
+    expected = [
+        "ace_step_t2audio", "comfyui_get_result", "comfyui_status",
+        "comfyui_upload_image", "image_edit_firered", "image_edit_longcat",
+        "qwen3_tts", "video_minimax_h3_i2v", "video_minimax_h3_r2v",
+        "video_minimax_h3_t2v", "z_image_turbo_t2i",
+    ]
+    _check("工具数量 = 11", len(tools) == 11, f"实际 {len(tools)}: {tools}")
+    for name in expected:
+        _check(f"已注册 {name}", name in tools)
+    for key, fname in srv.WORKFLOWS.items():
+        _check(f"工作流文件存在 [{key}]", (srv.WORKFLOW_DIR / fname).exists(), fname)
+
+    # 2. Z-Image-Turbo T2I
+    print("\n[2] z_image_turbo_t2i")
+    res, wf = call(srv.z_image_turbo_t2i, prompt="cinematic bar, charcoal",
+                   negative_prompt="logo, text", width=1280, height=720,
+                   seed=42, steps=8)
+    _check("提交成功", res.get("ok") is True and res.get("seed") == 42, str(res))
+    enc = inputs_of(wf, "CLIPTextEncode")[0]
+    _check("prompt 注入 CLIPTextEncode", "cinematic bar, charcoal" in enc["text"])
+    _check("negative 追加为 Do NOT include", "Do NOT include: logo, text" in enc["text"])
+    lat = inputs_of(wf, "EmptySD3LatentImage")[0]
+    _check("尺寸注入 EmptySD3LatentImage", (lat["width"], lat["height"]) == (1280, 720))
+    _check("seed 注入 KSampler", inputs_of(wf, "KSampler")[0]["seed"] == 42)
+    _check("PreviewImage 转为 SaveImage", not inputs_of(wf, "PreviewImage")
+           and "t2i/" in inputs_of(wf, "SaveImage")[0]["filename_prefix"])
+
+    # 3. LongCat 图像编辑
+    print("\n[3] image_edit_longcat")
+    res, wf = call(srv.image_edit_longcat, prompt="same girl at a desk",
+                   image="ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_hero_v01.png",
+                   negative_prompt="different face", seed=100, megapixels=2.0)
+    _check("提交成功", res.get("ok") is True, str(res))
+    _check("LoadImage 注入参考图", inputs_of(wf, "LoadImage")[0]["image"] == "ref_test.png")
+    _check("megapixels 注入 ImageScaleToTotalPixels",
+           inputs_of(wf, "ImageScaleToTotalPixels")[0]["megapixels"] == 2.0)
+    _check("seed 注入 KSampler", inputs_of(wf, "KSampler")[0]["seed"] == 100)
+    te = inputs_of(wf, "TextEncodeQwenImageEdit")
+    _check("正向 prompt 注入首个 TextEncodeQwenImageEdit",
+           te[0]["prompt"] == "same girl at a desk")
+    _check("负向 prompt 注入第二个 TextEncodeQwenImageEdit",
+           te[1]["prompt"] == "different face")
+
+    # 3b. FireRed Image Edit（参数注入点与 LongCat 不同：steps/cfg 走 Switch + Primitive*）
+    print("\n[3b] image_edit_firered")
+    res, wf = call(srv.image_edit_firered, prompt="same girl at a desk",
+                   image="ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_hero_v01.png",
+                   negative_prompt="different face", seed=200, megapixels=1.0,
+                   lightning=True, steps=8, cfg=1.0)
+    _check("提交成功", res.get("ok") is True, str(res))
+    _check("LoadImage 注入参考图", inputs_of(wf, "LoadImage")[0]["image"] == "ref_test.png")
+    _check("megapixels 注入 ResizeImageMaskNode",
+           inputs_of(wf, "ResizeImageMaskNode")[0]["resize_type.megapixels"] == 1.0)
+    _check("seed 注入 KSampler", inputs_of(wf, "KSampler")[0]["seed"] == 200)
+    _check("lightning 注入 PrimitiveBoolean",
+           inputs_of(wf, "PrimitiveBoolean")[0]["value"] is True)
+    _check("steps 注入 PrimitiveInt",
+           all(n["value"] == 8 for n in inputs_of(wf, "PrimitiveInt")))
+    _check("cfg 注入 PrimitiveFloat",
+           all(n["value"] == 1.0 for n in inputs_of(wf, "PrimitiveFloat")))
+    te = inputs_of(wf, "TextEncodeQwenImageEditPlus")
+    _check("正向 prompt 注入首个 TextEncodeQwenImageEditPlus",
+           te[0]["prompt"] == "same girl at a desk")
+    _check("负向 prompt 注入第二个 TextEncodeQwenImageEditPlus",
+           te[1]["prompt"] == "different face")
+    _check("SaveImage 前缀",
+           "firered_edit/" in inputs_of(wf, "SaveImage")[0]["filename_prefix"])
+    _check("返回值含 lightning/steps/cfg",
+           res.get("lightning") is True and res.get("steps") == 8 and res.get("cfg") == 1.0,
+           str(res))
+
+    # 4. Qwen3-TTS
+    print("\n[4] qwen3_tts")
+    res, wf = call(srv.qwen3_tts, text="明天那个模型的上线评审，你准备一下。",
+                   speaker="Vivian", seed=1301, instruct="28岁女性，北京口音。")
+    _check("提交成功", res.get("ok") is True and res.get("speaker") == "Vivian", str(res))
+    cv = inputs_of(wf, "Qwen3CustomVoice")[0]
+    _check("speaker/seed 注入", cv["speaker"] == "Vivian" and cv["seed"] == 1301)
+    _check("custom_speaker_name 必须为空", cv["custom_speaker_name"] == "")
+    _check("text/instruct 注入", "上线评审" in cv["text"] and "北京口音" in cv["instruct"])
+    sav = inputs_of(wf, "SaveAudioAdvanced")[0]
+    _check("SaveAudioAdvanced 前缀+格式",
+           sav["format"] == "flac" and sav["filename_prefix"].startswith("tts/"))
+    bad = json.loads(srv.qwen3_tts(text="x", speaker="不存在的音色"))
+    _check("非法 speaker 被拒绝", bad.get("ok") is False, str(bad))
+
+    # 5. ACE-Step
+    print("\n[5] ace_step_t2audio")
+    res, wf = call(srv.ace_step_t2audio, tags="solo piano, contemplative",
+                   lyrics="", duration=45.0, seed=4001, bpm=60, keyscale="E minor")
+    _check("提交成功", res.get("ok") is True and res.get("duration") == 45.0, str(res))
+    ace = inputs_of(wf, "TextEncodeAceStepAudio1.5")[0]
+    _check("tags/lyrics/bpm/keyscale 注入",
+           ace["tags"].startswith("solo piano") and ace["lyrics"] == ""
+           and ace["bpm"] == 60 and ace["keyscale"] == "E minor")
+    _check("duration 注入 PrimitiveFloat",
+           inputs_of(wf, "PrimitiveFloat")[0]["value"] == 45.0)
+    _check("seed 注入 KSampler", inputs_of(wf, "KSampler")[0]["seed"] == 4001)
+    _check("输出格式 mp3", inputs_of(wf, "SaveAudioAdvanced")[0]["format"] == "mp3")
+
+    # 6. H3 I2V
+    print("\n[6] video_minimax_h3_i2v")
+    res, wf = call(srv.video_minimax_h3_i2v, prompt="SHOT 1: medium shot ...",
+                   image="OUTPUT/t2i/frame.png", duration=8.0, seed=8001,
+                   megapixels=0.6)
+    _check("提交成功", res.get("ok") is True and res.get("duration_sec") == 8.0, str(res))
+    _check("LoadImage 注入首帧", inputs_of(wf, "LoadImage")[0]["image"] == "ref_test.png")
+    _check("prompt 注入 MiniMaxH3ImageToVideo",
+           inputs_of(wf, "MiniMaxH3ImageToVideo")[0]["prompt"].startswith("SHOT 1"))
+    _check("duration 注入 PrimitiveFloat",
+           inputs_of(wf, "PrimitiveFloat")[0]["value"] == 8.0)
+    _check("seed 注入 RandomNoise",
+           inputs_of(wf, "RandomNoise")[0]["noise_seed"] == 8001)
+    rs = inputs_of(wf, "ResolutionSelector")[0]
+    _check("画幅/像素注入 ResolutionSelector",
+           rs["aspect_ratio"] == "16:9 (Widescreen)" and rs["megapixels"] == 0.6)
+    _check("SaveVideo 前缀",
+           "h3_i2v" in inputs_of(wf, "SaveVideo")[0]["filename_prefix"])
+
+    # 7. H3 R2V
+    print("\n[7] video_minimax_h3_r2v")
+    res, wf = call(srv.video_minimax_h3_r2v, prompt="CUT 1: use <Picture 1> ...",
+                   ref_image_1="a.png", ref_image_2="b.png", duration=5.0)
+    _check("提交成功", res.get("ok") is True, str(res))
+    _check("prompt 注入 PrimitiveStringMultiline",
+           inputs_of(wf, "PrimitiveStringMultiline")[0]["value"].startswith("CUT 1"))
+    load = [n["inputs"]["image"] for n in wf.values()
+            if n.get("class_type") == "LoadImage"]
+    _check("两张参考图分别注入", len(load) == 2 and all(v == "ref_test.png" for v in load))
+    _check("SaveVideo 前缀",
+           "h3_r2v" in inputs_of(wf, "SaveVideo")[0]["filename_prefix"])
+
+    # 8. H3 T2V
+    print("\n[8] video_minimax_h3_t2v")
+    res, wf = call(srv.video_minimax_h3_t2v, prompt="[0s-1.5s] Shot 1: ...",
+                   duration=5.0, seed=7)
+    _check("提交成功", res.get("ok") is True, str(res))
+    _check("prompt 注入 MiniMaxH3ImageToVideo",
+           inputs_of(wf, "MiniMaxH3ImageToVideo")[0]["prompt"].startswith("[0s-1.5s]"))
+    _check("工作流无 LoadImage（纯文生视频）", not inputs_of(wf, "LoadImage"))
+    _check("seed 注入 RandomNoise", inputs_of(wf, "RandomNoise")[0]["noise_seed"] == 7)
+
+    # 9. 异步提交路径
+    print("\n[9] wait=False 异步提交")
+    res, _ = call(srv.video_minimax_h3_t2v, prompt="async test", wait=False)
+    _check("返回 queued 与 prompt_id",
+           res.get("status") == "queued" and res.get("prompt_id"), str(res))
+
+    # 10. 辅助工具（ComfyUI 离线也应优雅返回）
+    print("\n[10] 辅助工具")
+    status = json.loads(srv.comfyui_status())
+    _check("comfyui_status 返回结构完整",
+           "workflows" in status and "reachable" in status, str(status)[:200])
+    _check("所有工作流可被 status 列出",
+           len(status.get("workflows", {})) == 8, str(status.get("workflows")))
+
+    print("\n" + "=" * 68)
+    if FAILURES:
+        print(f" 结果：{len(FAILURES)} 项失败")
+        for f in FAILURES:
+            print(f"   x {f}")
+        return 1
+    print(" 结果：全部通过")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

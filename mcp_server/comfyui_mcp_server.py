@@ -1,0 +1,1131 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""ComfyUI MCP Server — 《如愿·看见》（stem_fest）制作流水线
+
+把 ``workflows/`` 下的 8 条 ComfyUI 工作流封装为 MCP 工具，供 Cline 直接调用：
+
+  🖼️ 图像层
+    z_image_turbo_t2i        Z-Image-Turbo 文生图.json
+    image_edit_longcat       Image Edit (LongCat Image Edit).json   (角色一致性·首选)
+    image_edit_firered       image_firered_image_edit1_1.json       (角色一致性·备选)
+  🎬 视频层
+    video_minimax_h3_i2v     video_minimax_h3_i2v.json   ⭐ 首选
+    video_minimax_h3_r2v     video_minimax_h3_r2v.json   ⭐ 角色锁定
+    video_minimax_h3_t2v     video_minimax_h3_t2v.json
+  🎵 音频层
+    qwen3_tts                Qwen3-TTS 语音合成.json
+    ace_step_t2audio         ACE-Step 1.5 文生音频.json
+
+  🧰 辅助：comfyui_status / comfyui_upload_image / comfyui_get_result
+
+启动（stdio，由 Cline 拉起）::
+
+    python mcp_server/comfyui_mcp_server.py
+
+环境变量::
+
+    COMFYUI_URL       默认 http://127.0.0.1:8188
+    COMFYUI_ROOT      默认自动探测（E:/code/ComfyUI、E:/ComfyUI …）
+    MCP_OUTPUT_ROOT   默认 <项目根>/OUTPUT
+
+设计约束（源自 README §13 与 LESSONS_LEARNED.md）：
+  * 参数注入按 ``class_type`` 匹配节点，与现有 scripts/ 保持一致
+  * 参考图先经 ``/upload/image`` 注册到 ComfyUI input 才能被 LoadImage 识别
+  * TTS 的 ``custom_speaker_name`` 必须留空，否则 ValueError
+  * Minimax H3 在 16GB VRAM 下 megapixels 上限 0.6，超过必 OOM
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import random
+import shutil
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
+from mcp.server.fastmcp import FastMCP
+
+# ── 路径与全局配置 ────────────────────────────────────────────────
+SERVER_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SERVER_DIR.parent
+WORKFLOW_DIR = PROJECT_ROOT / "workflows"
+OUTPUT_ROOT = Path(os.environ.get("MCP_OUTPUT_ROOT") or (PROJECT_ROOT / "OUTPUT"))
+COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
+
+# workflow key → 文件名（工作流以 API Format JSON 存放于 workflows/）
+WORKFLOWS: dict[str, str] = {
+    "t2i": "Z-Image-Turbo 文生图.json",
+    "image_edit": "Image Edit (LongCat Image Edit).json",
+    "firered": "image_firered_image_edit1_1.json",
+    "tts": "Qwen3-TTS 语音合成.json",
+    "ace": "ACE-Step 1.5 文生音频.json",
+    "h3_i2v": "video_minimax_h3_i2v.json",
+    "h3_r2v": "video_minimax_h3_r2v.json",
+    "h3_t2v": "video_minimax_h3_t2v.json",
+}
+
+# Qwen3-TTS 预置音色（填非预置名 → ValueError，见 README §13.7）
+TTS_SPEAKERS = [
+    "Vivian",      # 年轻女声，28-35 岁女性
+    "Dylan",       # 沉稳男声，30-40 岁男性
+    "Serena",      # 柔和女声，AI 系统语音感
+    "aiden",
+    "eric",
+    "ryan",
+    "ono_anna",
+    "sohee",
+    "uncle_fu",
+]
+
+# ResolutionSelector 常用取值（H3 视频工作流）
+ASPECT_RATIOS = [
+    "16:9 (Widescreen)",
+    "9:16 (Portrait)",
+    "1:1 (Square)",
+    "4:3 (Standard)",
+    "3:4 (Portrait)",
+    "3:2 (Photo)",
+    "2:3 (Portrait)",
+    "21:9 (Cinematic)",
+]
+
+MAX_SEED = 2 ** 48
+
+_COMFYUI_ROOT_CACHE: Optional[Path] = None
+
+mcp = FastMCP("comfyui-drama-tools", log_level="WARNING")
+
+# ── 通用小工具 ────────────────────────────────────────────────────
+def _dump(obj: Any) -> str:
+    """统一 JSON 输出（中文不转义，便于 Cline 阅读）。"""
+    return json.dumps(obj, ensure_ascii=False, indent=2)
+
+
+def _err(msg: str) -> str:
+    return _dump({"ok": False, "error": str(msg)})
+
+
+def _now() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _pick_seed(seed: int) -> int:
+    """seed < 0 → 随机；否则原样使用（同角色固定 seed 保证音色一致性）。"""
+    return int(seed) if int(seed) >= 0 else random.randrange(0, MAX_SEED)
+
+
+def _resolve_output_dir(output_dir: Optional[str], default_sub: str) -> Path:
+    if output_dir:
+        p = Path(output_dir)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+    else:
+        p = OUTPUT_ROOT / default_sub
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _detect_comfyui_root() -> Path:
+    """定位 ComfyUI 根目录（/upload/image 回退与本地文件回退用）。
+
+    优先级：
+      1. ``COMFYUI_ROOT`` 环境变量
+      2. 候选目录中 output/ 命中服务端 ``/internal/files/output`` 报出的文件名
+      3. 候选目录中 input/ 存在者
+    结果缓存，避免重复探测。
+    """
+    global _COMFYUI_ROOT_CACHE
+    if _COMFYUI_ROOT_CACHE is not None:
+        return _COMFYUI_ROOT_CACHE
+
+    env = os.environ.get("COMFYUI_ROOT")
+    if env and Path(env).is_dir():
+        _COMFYUI_ROOT_CACHE = Path(env)
+        return _COMFYUI_ROOT_CACHE
+
+    candidates = [
+        Path("E:/code/ComfyUI"),
+        Path("E:/ComfyUI"),
+        Path("E:/ComfyUI_windows_portable/ComfyUI"),
+        Path.home() / "ComfyUI",
+    ]
+    candidates = [c for c in candidates if c.is_dir()]
+
+    # 用服务端报出的输出文件名反查哪个目录才是真正的 ComfyUI
+    try:
+        listed = _http_json("/internal/files/output", method="GET", timeout=8)
+        names = {str(item).rsplit(" [", 1)[0] for item in listed} if isinstance(listed, list) else set()
+        if names:
+            for c in candidates:
+                out = c / "output"
+                if out.is_dir() and any((out / n).exists() for n in list(names)[:40]):
+                    _COMFYUI_ROOT_CACHE = c
+                    return _COMFYUI_ROOT_CACHE
+    except Exception:
+        pass
+
+    for c in candidates:
+        if (c / "input").is_dir():
+            _COMFYUI_ROOT_CACHE = c
+            return _COMFYUI_ROOT_CACHE
+
+    _COMFYUI_ROOT_CACHE = Path(env) if env else Path("E:/code/ComfyUI")
+    return _COMFYUI_ROOT_CACHE
+
+
+def _comfyui_input_dir() -> Path:
+    d = _detect_comfyui_root() / "input"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _comfyui_output_dir() -> Path:
+    return _detect_comfyui_root() / "output"
+
+
+# ── ComfyUI REST API 封装 ─────────────────────────────────────────
+def _http_json(endpoint: str, payload: Optional[dict] = None,
+               method: str = "POST", timeout: int = 60) -> dict:
+    url = f"{COMFYUI_URL}{endpoint}"
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"}, method=method
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", errors="replace")[:2000]
+        except Exception:
+            pass
+        raise RuntimeError(f"ComfyUI HTTP {e.code} {e.reason} @ {endpoint}\n{detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(
+            f"无法连接 ComfyUI ({COMFYUI_URL})：{e.reason}。请先启动 ComfyUI。"
+        ) from e
+
+
+def _load_workflow(key: str) -> dict:
+    path = WORKFLOW_DIR / WORKFLOWS[key]
+    if not path.exists():
+        raise FileNotFoundError(f"工作流不存在: {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _queue(wf: dict) -> str:
+    result = _http_json("/prompt",
+                        {"prompt": wf, "client_id": f"mcp_{uuid.uuid4().hex[:8]}"})
+    pid = result.get("prompt_id", "")
+    if not pid:
+        raise RuntimeError(f"提交失败: {result}")
+    return pid
+
+
+def _wait(pid: str, timeout: int) -> dict:
+    """轮询 /history/{prompt_id} 直到完成，返回该 history entry。"""
+    start = time.time()
+    while time.time() - start < timeout:
+        data = _http_json(f"/history/{pid}", method="GET", timeout=30)
+        entry = data.get(pid)
+        if entry:
+            status = (entry.get("status") or {}).get("status_str", "")
+            if status == "error":
+                msgs = (entry.get("status") or {}).get("messages") or []
+                raise RuntimeError(
+                    "ComfyUI 执行失败: " + json.dumps(msgs, ensure_ascii=False)[:1500]
+                )
+            if entry.get("outputs") or status == "success":
+                return entry
+        time.sleep(3)
+    raise TimeoutError(
+        f"等待超时 ({timeout}s)：prompt_id={pid} 仍在执行，"
+        f'可稍后调用 comfyui_get_result(prompt_id="{pid}") 取回结果'
+    )
+
+# ── 参考图上传（LoadImage 只能读取已注册到 ComfyUI input 的文件）──
+def _upload_image(image_path: str, target_name: Optional[str] = None) -> str:
+    """把本地图像上传到 ComfyUI input，返回 LoadImage 可用的文件名。"""
+    src = Path(image_path)
+    if not src.is_absolute():
+        src = PROJECT_ROOT / src
+    if not src.exists():
+        raise FileNotFoundError(f"输入图像不存在: {src}")
+
+    # 中文/空格文件名在部分环境下会让 LoadImage 失败 → 归一化为 ASCII 名
+    fname = target_name or src.name
+    if any(ord(ch) > 127 for ch in fname) or " " in fname:
+        fname = f"mcp_ref_{uuid.uuid4().hex[:8]}{src.suffix.lower() or '.png'}"
+
+    boundary = "----ComfyUIMCPBoundary" + uuid.uuid4().hex
+    parts = [
+        f"--{boundary}\r\n".encode("utf-8"),
+        (
+            f'Content-Disposition: form-data; name="image"; filename="{fname}"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8"),
+        src.read_bytes(),
+        f"\r\n--{boundary}--\r\n".encode("utf-8"),
+    ]
+    req = urllib.request.Request(
+        f"{COMFYUI_URL}/upload/image",
+        data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            result = json.loads(resp.read().decode("utf-8", errors="replace"))
+        name = result.get("name", fname)
+        sub = result.get("subfolder", "")
+        return f"{sub}/{name}" if sub else name
+    except Exception as e:
+        # API 不可用时回退为直接拷贝到 input 目录
+        dst = _comfyui_input_dir() / fname
+        try:
+            shutil.copy2(src, dst)
+            return fname
+        except Exception:
+            raise RuntimeError(f"上传参考图失败: {e}") from e
+
+
+# ── 输出收集与下载 ────────────────────────────────────────────────
+def _collect_outputs(history_entry: dict) -> list[dict]:
+    """从 history 中收集输出文件（兼容 images / gifs / videos / audio）。"""
+    outputs: list[dict] = []
+    for node_id, nd in (history_entry.get("outputs") or {}).items():
+        if not isinstance(nd, dict):
+            continue
+        for key in ("images", "gifs", "videos", "audio"):
+            for item in nd.get(key) or []:
+                if isinstance(item, dict) and item.get("filename"):
+                    outputs.append({
+                        "filename": item["filename"],
+                        "subfolder": item.get("subfolder", "") or "",
+                        "type": item.get("type", "output"),
+                        "node_id": node_id,
+                    })
+    return outputs
+
+
+def _download_file(item: dict, dst: Path) -> Optional[str]:
+    """通过 /view 下载（失败回退文件系统拷贝）。成功返回绝对路径。"""
+    fname = item["filename"]
+    sub = item.get("subfolder", "") or ""
+    ftype = item.get("type", "output")
+    params = urllib.parse.urlencode({"filename": fname, "subfolder": sub, "type": ftype})
+    try:
+        req = urllib.request.Request(f"{COMFYUI_URL}/view?{params}")
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            blob = resp.read()
+        if len(blob) > 100:
+            dst.write_bytes(blob)
+            return str(dst)
+    except Exception:
+        pass
+
+    out_root = _comfyui_output_dir()
+    for candidate in (out_root / sub / fname, out_root / "temp" / fname, out_root / fname):
+        if candidate.exists():
+            shutil.copy2(candidate, dst)
+            return str(dst)
+    return None
+
+
+def _save_outputs(history_entry: dict, out_dir: Path) -> list[dict]:
+    items = _collect_outputs(history_entry)
+    # 有正式输出（type=output）时丢弃预览节点产生的临时文件，避免重复下载
+    if any(i["type"] == "output" for i in items):
+        items = [i for i in items if i["type"] == "output"]
+    saved: list[dict] = []
+    for item in items:
+        dst = out_dir / item["filename"]
+        path = _download_file(item, dst)
+        if path:
+            saved.append({
+                "path": path,
+                "filename": item["filename"],
+                "size_kb": round(dst.stat().st_size / 1024, 1),
+            })
+    return saved
+
+
+def _run(wf: dict, out_dir: Path, wait: bool, timeout: int, meta: dict) -> str:
+    """提交 → （等待）→ 下载，返回统一 JSON 结果。"""
+    prompt_id = _queue(wf)
+    base = {"ok": True, "prompt_id": prompt_id, "comfyui": COMFYUI_URL, **meta}
+    if not wait:
+        return _dump({**base, "status": "queued",
+                      "hint": "用 comfyui_get_result(prompt_id) 取回结果"})
+    t0 = time.time()
+    history = _wait(prompt_id, timeout)
+    saved = _save_outputs(history, out_dir)
+    return _dump({
+        **base,
+        "status": "success" if saved else "no_output_files",
+        "elapsed_sec": round(time.time() - t0, 1),
+        "output_dir": str(out_dir),
+        "files": saved,
+    })
+
+
+def _preview_to_save(wf: dict, filename_prefix: str) -> None:
+    """PreviewImage(临时文件) → SaveImage(正式输出)，保证产物落在 output/ 可下载。
+
+    与 README §13.5 记录的 SaveImage + filename_prefix 用法一致。
+    """
+    for node in wf.values():
+        if node.get("class_type") == "PreviewImage":
+            node["class_type"] = "SaveImage"
+            node["inputs"] = {"images": node["inputs"]["images"],
+                              "filename_prefix": filename_prefix}
+
+
+def _set_inputs(wf: dict, class_type: str, **values: Any) -> int:
+    """按 class_type 注入参数，返回命中节点数。"""
+    hits = 0
+    for node in wf.values():
+        if node.get("class_type") == class_type:
+            node.setdefault("inputs", {}).update(values)
+            hits += 1
+    return hits
+
+# ══════════════════════════════════════════════════════════════════
+# 🖼️ 图像层
+# ══════════════════════════════════════════════════════════════════
+@mcp.tool()
+def z_image_turbo_t2i(
+    prompt: str,
+    negative_prompt: str = "",
+    width: int = 1024,
+    height: int = 1280,
+    seed: int = -1,
+    steps: int = 8,
+    cfg: float = 1.0,
+    batch_size: int = 1,
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Z-Image-Turbo 文生图（工作流 `Z-Image-Turbo 文生图.json`，国产首选 T2I）。
+
+    用于生成场景图、道具、UI、群像等**不需要角色一致性**的镜头；
+    需要引用定妆照保持角色一致时改用 `image_edit_longcat`。
+
+    Args:
+        prompt: 画面描述（英文效果最佳）。
+        negative_prompt: 负面词。该工作流负面条件被 ConditioningZeroOut 置零，
+            因此负面词以 "Do NOT include: ..." 追加到正向提示词
+            （与根目录 `README.md` §7 的做法一致）。
+        width: 宽（像素）。横屏 1280 / 竖屏 720 / 方图 1024。
+        height: 高（像素）。横屏 720 / 竖屏 1280 / 方图 1024。
+        seed: 随机种子；-1 表示随机（会回传实际使用的 seed 便于复现）。
+        steps: 采样步数（Turbo 模型推荐 8）。
+        cfg: 引导强度（Turbo 推荐 1.0）。
+        batch_size: 一次生成张数。
+        filename_prefix: 保存前缀，默认 `t2i/<时间戳>`。
+        output_dir: 输出目录（绝对路径或相对项目根），默认 `OUTPUT/t2i`。
+        wait: True 阻塞直到完成并下载；False 只提交，返回 prompt_id。
+        timeout_seconds: 等待超时秒数。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, files:[{path,size_kb}], ...}
+    """
+    try:
+        seed_used = _pick_seed(seed)
+        wf = _load_workflow("t2i")
+
+        full_prompt = prompt.strip()
+        if negative_prompt.strip():
+            full_prompt += f"\n\nDo NOT include: {negative_prompt.strip()}"
+
+        _set_inputs(wf, "CLIPTextEncode", text=full_prompt)
+        _set_inputs(wf, "EmptySD3LatentImage",
+                    width=int(width), height=int(height), batch_size=int(batch_size))
+        _set_inputs(wf, "KSampler", seed=seed_used, steps=int(steps), cfg=float(cfg))
+
+        prefix = filename_prefix or f"t2i/{_now()}"
+        _preview_to_save(wf, prefix)
+
+        out_dir = _resolve_output_dir(output_dir, "t2i")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "z_image_turbo_t2i",
+            "workflow": WORKFLOWS["t2i"],
+            "seed": seed_used,
+            "width": int(width),
+            "height": int(height),
+        })
+    except Exception as e:
+        return _err(f"z_image_turbo_t2i 失败: {e}")
+
+
+@mcp.tool()
+def image_edit_longcat(
+    prompt: str,
+    image: str,
+    negative_prompt: str = "",
+    seed: int = -1,
+    megapixels: float = 1.0,
+    guidance: float = 4.5,
+    steps: int = 50,
+    cfg: float = 4.5,
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Image Edit · LongCat 图像编辑（工作流 `Image Edit (LongCat Image Edit).json`）。
+
+    **角色一致性关键工具**（LESSONS_LEARNED #6）：把角色定妆照作为 `image` 输入，
+    再用 `prompt` 描述新场景，即可让同一角色出现在不同镜头而脸不变。
+    例：定妆照 `ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_hero_v01.png`
+    + "同一位初中女生坐在傍晚的教室课桌前，暖金色天光，中景"。
+
+    Args:
+        prompt: 编辑/重绘描述（如"同一位女性在地铁车厢里观察人群"）。
+        image: 参考图路径（定妆照），自动上传到 ComfyUI input。
+        negative_prompt: 负面描述。
+        seed: 随机种子；-1 = 随机（同角色建议固定 seed）。
+        megapixels: 输出总像素（百万）。1920×1920 ≈ 3.69；默认 1.0。
+        guidance: FluxGuidance 强度（工作流默认 4.5）。
+        steps: 采样步数（工作流默认 50）。
+        cfg: KSampler cfg（工作流默认 4.5）。
+        filename_prefix: 保存前缀，默认 `image_edit/<时间戳>`。
+        output_dir: 输出目录，默认 `OUTPUT/image_edit`。
+        wait: True 阻塞等待；False 仅提交。
+        timeout_seconds: 等待超时秒数。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, reference_image, files, ...}
+    """
+    try:
+        seed_used = _pick_seed(seed)
+        ref_name = _upload_image(image)
+        wf = _load_workflow("image_edit")
+
+        _set_inputs(wf, "LoadImage", image=ref_name)
+        _set_inputs(wf, "ImageScaleToTotalPixels", megapixels=float(megapixels))
+        _set_inputs(wf, "FluxGuidance", guidance=float(guidance))
+        _set_inputs(wf, "KSampler", seed=seed_used, steps=int(steps), cfg=float(cfg))
+
+        # 两个 TextEncodeQwenImageEdit：node id 小的为正向，另一个为负向
+        encoders = sorted(
+            ((nid, n) for nid, n in wf.items()
+             if n.get("class_type") == "TextEncodeQwenImageEdit"),
+            key=lambda x: x[0],
+        )
+        if encoders:
+            encoders[0][1]["inputs"]["prompt"] = prompt.strip()
+        if len(encoders) > 1:
+            encoders[1][1]["inputs"]["prompt"] = negative_prompt.strip()
+
+        prefix = filename_prefix or f"image_edit/{_now()}"
+        _preview_to_save(wf, prefix)
+
+        out_dir = _resolve_output_dir(output_dir, "image_edit")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "image_edit_longcat",
+            "workflow": WORKFLOWS["image_edit"],
+            "seed": seed_used,
+            "reference_image": ref_name,
+        })
+    except Exception as e:
+        return _err(f"image_edit_longcat 失败: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+# 🖼️ 图像层 · FireRed-Image-Edit 1.1（Qwen-Image-Edit 血统）
+# ══════════════════════════════════════════════════════════════════
+@mcp.tool()
+def image_edit_firered(
+    prompt: str,
+    image: str,
+    negative_prompt: str = "",
+    seed: int = -1,
+    megapixels: float = 1.0,
+    lightning: bool = False,
+    steps: Optional[int] = None,
+    cfg: Optional[float] = None,
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Image Edit · FireRed-Image-Edit-1.1（工作流 `image_firered_image_edit1_1.json`）。
+
+    用途与 `image_edit_longcat` **完全相同**（角色一致性：定妆照 → 新场景分镜图），
+    只是底层换成另一套模型：**FireRed-Image-Edit 1.1**（Qwen-Image-Edit 血统；
+    CLIP 用 `qwen_2.5_vl_7b`，VAE 用 `qwen_image_vae`）。
+
+    两个工具**互为备选**：同一张定妆照 + 同一段 prompt 各跑一次，取更像本人的那版。
+
+    ⚠️ **画风取决于提示词，不取决于用哪个模型**：国内 AI 短剧（如《万妖图录传》）的通行做法是
+    在提示词里**显式写明"国风 / 东方审美 / 中国动画"**；只写泛泛的"3D 动画风格"，
+    本片已定案为**超写实真人质感**，风格后缀（正向 + 负向）见
+    **`ASSETS/STYLE/README.md` 的「★ 全片风格基准」** —— 出图必带。
+
+    Args:
+        prompt: 编辑/重绘描述（如"同一位女生坐在傍晚的课桌前，中景"）。
+        image: 参考图路径（定妆照），自动上传到 ComfyUI input。
+        negative_prompt: 负面描述（该工作流原本留空）。
+        seed: 随机种子；-1 = 随机（同角色建议固定 seed）。
+        megapixels: 参考图缩放总像素（百万），默认 1.0。
+        lightning: True = 启用 Lightning LoRA（**8 步**快速模式）；False = 完整 **40 步**（默认）。
+        steps: 显式指定采样步数；None = 沿用工作流按 lightning 决定的 40 / 8。
+        cfg: 显式指定 CFG；None = 沿用工作流按 lightning 决定的 4 / 1。
+        filename_prefix: 保存前缀，默认 `firered_edit/<时间戳>`。
+        output_dir: 输出目录，默认 `OUTPUT/image_edit`。
+        wait: True 阻塞等待；False 仅提交。
+        timeout_seconds: 等待超时秒数。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, reference_image, lightning, steps, cfg, files, ...}
+    """
+    try:
+        seed_used = _pick_seed(seed)
+        ref_name = _upload_image(image)
+        wf = _load_workflow("firered")
+
+        _set_inputs(wf, "LoadImage", image=ref_name)
+        # 注意：该工作流用 ResizeImageMaskNode 缩放，参数名**带点**
+        _set_inputs(wf, "ResizeImageMaskNode",
+                    **{"resize_type.megapixels": float(megapixels)})
+        _set_inputs(wf, "KSampler", seed=seed_used)
+        # Lightning LoRA 开关：PrimitiveBoolean → ComfySwitchNode 决定 steps/cfg
+        _set_inputs(wf, "PrimitiveBoolean", value=bool(lightning))
+
+        steps_used = 8 if lightning else 40
+        cfg_used = 1.0 if lightning else 4.0
+        # 该工作流的 steps / cfg 走 Switch + Primitive* 节点，**不能直接写 KSampler**
+        if steps is not None:
+            _set_inputs(wf, "PrimitiveInt", value=int(steps))
+            steps_used = int(steps)
+        if cfg is not None:
+            _set_inputs(wf, "PrimitiveFloat", value=float(cfg))
+            cfg_used = float(cfg)
+
+        # 两个 TextEncodeQwenImageEditPlus：node id 小的为正向
+        encoders = sorted(
+            ((nid, n) for nid, n in wf.items()
+             if n.get("class_type") == "TextEncodeQwenImageEditPlus"),
+            key=lambda x: x[0],
+        )
+        if encoders:
+            encoders[0][1]["inputs"]["prompt"] = prompt.strip()
+        if len(encoders) > 1:
+            encoders[1][1]["inputs"]["prompt"] = negative_prompt.strip()
+
+        prefix = filename_prefix or f"firered_edit/{_now()}"
+        # 该工作流**已自带 SaveImage**（不是 PreviewImage），直接改前缀
+        _set_inputs(wf, "SaveImage", filename_prefix=prefix)
+
+        out_dir = _resolve_output_dir(output_dir, "image_edit")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "image_edit_firered",
+            "workflow": WORKFLOWS["firered"],
+            "seed": seed_used,
+            "reference_image": ref_name,
+            "lightning": bool(lightning),
+            "steps": steps_used,
+            "cfg": cfg_used,
+        })
+    except Exception as e:
+        return _err(f"image_edit_firered 失败: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🎵 音频层
+# ══════════════════════════════════════════════════════════════════
+@mcp.tool()
+def qwen3_tts(
+    text: str,
+    speaker: str = "Vivian",
+    instruct: str = "",
+    seed: int = -1,
+    language: str = "Auto",
+    audio_format: str = "flac",
+    max_new_tokens: int = 2048,
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Qwen3-TTS 语音合成（工作流 `Qwen3-TTS 语音合成.json`，输出 FLAC/MP3）。
+
+    用于角色配音 / 旁白。**同一角色固定 `speaker` + `seed` 才能跨集保持一致音色**
+    （README §13.7、§13.11）。
+
+    Args:
+        text: 要合成的台词/旁白，可用 `⏸️（稍作停顿）` 等中文提示控制节奏。
+        speaker: 预置音色，可选 Vivian（年轻女声）/ Dylan（沉稳男声）/
+            Serena（柔和女声·AI 系统感）/ aiden / eric / ryan / ono_anna /
+            sohee / uncle_fu。
+        instruct: 音色与表演指令，如 "28岁女性，北京口音，自嘲节奏感。"。
+        seed: 随机种子；-1 = 随机。**同角色务必固定 seed**。
+        language: 语言，默认 "Auto"。
+        audio_format: 输出格式，flac（无损）或 mp3。
+        max_new_tokens: 生成长度上限（长台词可调大）。
+        filename_prefix: 保存前缀，默认 `tts/<时间戳>`。
+        output_dir: 输出目录，默认 `OUTPUT/tts`。
+        wait: True 阻塞等待并下载；False 仅提交。
+        timeout_seconds: 等待超时秒数（TTS 约 1-2 分钟）。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, speaker, files, ...}
+
+    Note:
+        `custom_speaker_name` 不是自定义名字字段，而是音色 mixing 的 speaker 名
+        列表，填非预置名会导致 ValueError —— 本工具始终置空。
+    """
+    try:
+        if speaker not in TTS_SPEAKERS:
+            return _err(
+                f"非法 speaker='{speaker}'。该字段只接受预置音色："
+                f"{', '.join(TTS_SPEAKERS)}（填自定义名字会触发 ValueError）"
+            )
+        seed_used = _pick_seed(seed)
+        wf = _load_workflow("tts")
+
+        _set_inputs(
+            wf, "Qwen3CustomVoice",
+            text=text,
+            language=language,
+            speaker=speaker,
+            seed=seed_used,
+            instruct=instruct,
+            custom_speaker_name="",      # ⚠️ 必须为空
+            max_new_tokens=int(max_new_tokens),
+        )
+        prefix = filename_prefix or f"tts/{_now()}"
+        _set_inputs(wf, "SaveAudioAdvanced", filename_prefix=prefix,
+                    format=audio_format)
+
+        out_dir = _resolve_output_dir(output_dir, "tts")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "qwen3_tts",
+            "workflow": WORKFLOWS["tts"],
+            "seed": seed_used,
+            "speaker": speaker,
+            "audio_format": audio_format,
+            "text_chars": len(text),
+        })
+    except Exception as e:
+        return _err(f"qwen3_tts 失败: {e}")
+
+@mcp.tool()
+def ace_step_t2audio(
+    tags: str,
+    lyrics: str = "",
+    duration: float = 60.0,
+    seed: int = -1,
+    bpm: int = -1,
+    keyscale: str = "",
+    language: str = "en",
+    timesignature: str = "4",
+    steps: int = 8,
+    cfg: float = 1.0,
+    cfg_scale: float = 2.0,
+    temperature: float = 0.85,
+    top_p: float = 0.9,
+    audio_format: str = "mp3",
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """ACE-Step 1.5 文生音频（工作流 `ACE-Step 1.5 文生音频.json`，输出 MP3）。
+
+    用于配乐 BGM / 合成音效。遵循 `ASSETS/配乐提示词规格.md` 的
+    **Caption（氛围总谱）+ Lyrics（分镜脚本）双管齐下**法则。
+
+    Args:
+        tags: 音乐风格/情绪总谱，如
+            "solo piano, contemplative, sparse notes, minor key, 60 BPM"。
+        lyrics: 歌词/结构脚本，可含 `[Intro][Verse][Chorus][Bridge][Outro]`
+            段落标记；**纯器乐留空字符串**。
+        duration: 时长（秒）。
+        seed: 随机种子；-1 = 随机。
+        bpm: 每分钟节拍数；-1 表示沿用工作流默认值。
+        keyscale: 调式，如 "C major" / "E minor"；空则沿用默认。
+        language: 歌词语言（en / zh ...）。
+        timesignature: 拍号，默认 "4"。
+        steps: 采样步数（Turbo 推荐 8）。
+        cfg: KSampler cfg。
+        cfg_scale: 文本编码器的 cfg_scale。
+        temperature: 生成温度。
+        top_p: 核采样阈值。
+        audio_format: 输出格式，mp3（默认）/ flac / wav。
+        filename_prefix: 保存前缀，默认 `bgm/<时间戳>`。
+        output_dir: 输出目录，默认 `OUTPUT/bgm`。
+        wait: True 阻塞等待并下载；False 仅提交。
+        timeout_seconds: 等待超时秒数。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, duration, files, ...}
+    """
+    try:
+        seed_used = _pick_seed(seed)
+        wf = _load_workflow("ace")
+
+        encoder_payload: dict[str, Any] = {
+            "tags": tags,
+            "lyrics": lyrics,
+            "seed": seed_used,
+            "language": language,
+            "timesignature": timesignature,
+            "generate_audio_codes": True,
+            "cfg_scale": float(cfg_scale),
+            "temperature": float(temperature),
+            "top_p": float(top_p),
+        }
+        if int(bpm) > 0:
+            encoder_payload["bpm"] = int(bpm)
+        if keyscale.strip():
+            encoder_payload["keyscale"] = keyscale.strip()
+        _set_inputs(wf, "TextEncodeAceStepAudio1.5", **encoder_payload)
+
+        # 时长由 PrimitiveFloat("Song Duration") 同时驱动 Latent 与 TextEncode
+        _set_inputs(wf, "PrimitiveFloat", value=float(duration))
+        _set_inputs(wf, "KSampler", seed=seed_used, steps=int(steps), cfg=float(cfg))
+
+        prefix = filename_prefix or f"bgm/{_now()}"
+        _set_inputs(wf, "SaveAudioAdvanced", filename_prefix=prefix,
+                    format=audio_format)
+
+        out_dir = _resolve_output_dir(output_dir, "bgm")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "ace_step_t2audio",
+            "workflow": WORKFLOWS["ace"],
+            "seed": seed_used,
+            "duration": float(duration),
+            "audio_format": audio_format,
+        })
+    except Exception as e:
+        return _err(f"ace_step_t2audio 失败: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+# 🎬 视频层 · Minimax H3（画面 + 环境音联合生成）
+# ══════════════════════════════════════════════════════════════════
+def _apply_h3_common(wf: dict, duration: float, seed: int, aspect_ratio: str,
+                     megapixels: float, steps: int, filename_prefix: str) -> None:
+    """H3 三条工作流共有的参数注入。"""
+    _set_inputs(wf, "PrimitiveFloat", value=float(duration))   # Float (duration)
+    _set_inputs(wf, "RandomNoise", noise_seed=seed)
+    _set_inputs(wf, "ResolutionSelector",
+                aspect_ratio=aspect_ratio, megapixels=float(megapixels))
+    _set_inputs(wf, "BasicScheduler", steps=int(steps))
+    _set_inputs(wf, "SaveVideo", filename_prefix=filename_prefix)
+
+
+def _h3_meta(tool: str, key: str, duration: float, seed: int,
+             aspect_ratio: str, megapixels: float) -> dict:
+    return {
+        "tool": tool,
+        "workflow": WORKFLOWS[key],
+        "seed": seed,
+        "duration_sec": float(duration),
+        "aspect_ratio": aspect_ratio,
+        "megapixels": float(megapixels),
+        "audio_note": "H3 音画联合生成，成片已含环境音；角色配音用 qwen3_tts、配乐用 ace_step_t2audio 后期三层混音。",
+    }
+
+
+@mcp.tool()
+def video_minimax_h3_i2v(
+    prompt: str,
+    image: str,
+    duration: float = 5.0,
+    seed: int = -1,
+    aspect_ratio: str = "16:9 (Widescreen)",
+    megapixels: float = 0.6,
+    steps: int = 20,
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Minimax H3 图生视频 I2V ⭐（工作流 `video_minimax_h3_i2v.json`，视频生成首选）。
+
+    以一张首帧图 + 运动描述生成带环境音的视频片段（音画天然同步，README §13.3）。
+
+    Args:
+        prompt: 分镜描述——建议写清 SHOT 段落、镜头运动与 Audio 环境音，例：
+            "SHOT 1: 中景，她放下咖啡杯并转头看向窗外… Audio: 办公室底噪、键盘声"。
+        image: 首帧图路径（通常来自 `z_image_turbo_t2i` / `image_edit_longcat`
+            的输出），自动上传到 ComfyUI input。
+        duration: 时长（秒）。工作流内部换算为 24fps 并对齐 17 帧倍数。
+        seed: 随机种子；-1 = 随机。
+        aspect_ratio: 画幅，如 "16:9 (Widescreen)" / "9:16 (Portrait)"。
+        megapixels: 目标像素。⚠️ 16GB VRAM 上限 **0.6**（≈1056×608）；
+            调到 0.92(720p) 必定 torch.OutOfMemoryError（LESSONS_LEARNED #10）。
+            要 1080p 请生成后超分。
+        steps: 采样步数（默认 20）。
+        filename_prefix: 保存前缀，默认 `video/<时间戳>_h3_i2v`。
+        output_dir: 输出目录，默认 `OUTPUT/video`。
+        wait: True 阻塞等待（单条 5-15 分钟）；False 仅提交。
+        timeout_seconds: 等待超时秒数。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, duration_sec, files, ...}
+    """
+    try:
+        seed_used = _pick_seed(seed)
+        first_frame = _upload_image(image)
+        wf = _load_workflow("h3_i2v")
+
+        _set_inputs(wf, "LoadImage", image=first_frame)
+        _set_inputs(wf, "MiniMaxH3ImageToVideo", prompt=prompt)
+
+        prefix = filename_prefix or f"video/{_now()}_h3_i2v"
+        _apply_h3_common(wf, duration, seed_used, aspect_ratio, megapixels, steps, prefix)
+
+        out_dir = _resolve_output_dir(output_dir, "video")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            **_h3_meta("video_minimax_h3_i2v", "h3_i2v", duration,
+                       seed_used, aspect_ratio, megapixels),
+            "first_frame": first_frame,
+        })
+    except Exception as e:
+        return _err(f"video_minimax_h3_i2v 失败: {e}")
+
+@mcp.tool()
+def video_minimax_h3_r2v(
+    prompt: str,
+    ref_image_1: str,
+    ref_image_2: Optional[str] = None,
+    duration: float = 5.0,
+    seed: int = -1,
+    aspect_ratio: str = "16:9 (Widescreen)",
+    megapixels: float = 0.4,
+    steps: int = 20,
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Minimax H3 参考图生视频 R2V ⭐（工作流 `video_minimax_h3_r2v.json`，角色锁定）。
+
+    最多 2 张参考图（定妆照/场景图），在 prompt 中用 `<Picture 1>` / `<Picture 2>`
+    引用，适合**多镜头角色一致性**与风格化打斗分镜（README §13.4）。
+
+    Args:
+        prompt: 分镜描述，用 `<Picture 1>`、`<Picture 2>` 指代参考图，
+            用 `CUT 1:` / `CUT 2:` 划分段落，并写明 Audio 描述。
+        ref_image_1: 参考图 1（对应 `<Picture 1>`），自动上传。
+        ref_image_2: 参考图 2（对应 `<Picture 2>`）；**不传则复用参考图 1**。
+        duration: 时长（秒）。
+        seed: 随机种子；-1 = 随机。
+        aspect_ratio: 画幅。
+        megapixels: 目标像素。R2V 双参考图显存占用更高，默认 0.4；
+            16GB VRAM 下不建议超过 0.6。
+        steps: 采样步数。
+        filename_prefix: 保存前缀，默认 `video/<时间戳>_h3_r2v`。
+        output_dir: 输出目录，默认 `OUTPUT/video`。
+        wait: True 阻塞等待；False 仅提交。
+        timeout_seconds: 等待超时秒数。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, duration_sec, files, ...}
+    """
+    try:
+        seed_used = _pick_seed(seed)
+        ref1 = _upload_image(ref_image_1)
+        ref2 = _upload_image(ref_image_2) if ref_image_2 else ref1
+        wf = _load_workflow("h3_r2v")
+
+        _set_inputs(wf, "PrimitiveStringMultiline", value=prompt)
+
+        # LoadImage 节点：137 → ref_image_0，139 → ref_image_1（按 node id 升序）
+        load_nodes = sorted(
+            (nid for nid, n in wf.items() if n.get("class_type") == "LoadImage"),
+            key=lambda x: int(x),
+        )
+        if len(load_nodes) >= 1:
+            wf[load_nodes[0]]["inputs"]["image"] = ref1
+        if len(load_nodes) >= 2:
+            wf[load_nodes[1]]["inputs"]["image"] = ref2
+
+        prefix = filename_prefix or f"video/{_now()}_h3_r2v"
+        _apply_h3_common(wf, duration, seed_used, aspect_ratio, megapixels, steps, prefix)
+
+        out_dir = _resolve_output_dir(output_dir, "video")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            **_h3_meta("video_minimax_h3_r2v", "h3_r2v", duration,
+                       seed_used, aspect_ratio, megapixels),
+            "ref_image_1": ref1,
+            "ref_image_2": ref2,
+        })
+    except Exception as e:
+        return _err(f"video_minimax_h3_r2v 失败: {e}")
+
+@mcp.tool()
+def video_minimax_h3_t2v(
+    prompt: str,
+    duration: float = 5.0,
+    seed: int = -1,
+    aspect_ratio: str = "16:9 (Widescreen)",
+    megapixels: float = 0.4,
+    steps: int = 20,
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Minimax H3 文生视频 T2V（工作流 `video_minimax_h3_t2v.json`）。
+
+    无需参考图，直接由文本生成带环境音的视频，适合纯文本转视频 /
+    UI 动画 / 无角色动态镜头（README §13.5）。
+
+    Args:
+        prompt: 分镜脚本，建议含镜头类型、故事板时间轴与 Audio 描述，例：
+            "[0s-1.5s] Shot 1: 高侧角度… Audio: 风声、脚步、低频配乐"。
+        duration: 时长（秒）。
+        seed: 随机种子；-1 = 随机。
+        aspect_ratio: 画幅。
+        megapixels: 目标像素；16GB VRAM 建议 ≤ 0.6（默认 0.4）。
+        steps: 采样步数。
+        filename_prefix: 保存前缀，默认 `video/<时间戳>_h3_t2v`。
+        output_dir: 输出目录，默认 `OUTPUT/video`。
+        wait: True 阻塞等待；False 仅提交。
+        timeout_seconds: 等待超时秒数。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, duration_sec, files, ...}
+    """
+    try:
+        seed_used = _pick_seed(seed)
+        wf = _load_workflow("h3_t2v")
+
+        _set_inputs(wf, "MiniMaxH3ImageToVideo", prompt=prompt)
+
+        prefix = filename_prefix or f"video/{_now()}_h3_t2v"
+        _apply_h3_common(wf, duration, seed_used, aspect_ratio, megapixels, steps, prefix)
+
+        out_dir = _resolve_output_dir(output_dir, "video")
+        return _run(wf, out_dir, wait, timeout_seconds,
+                    _h3_meta("video_minimax_h3_t2v", "h3_t2v", duration,
+                             seed_used, aspect_ratio, megapixels))
+    except Exception as e:
+        return _err(f"video_minimax_h3_t2v 失败: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+# 🧰 辅助工具
+# ══════════════════════════════════════════════════════════════════
+@mcp.tool()
+def comfyui_status() -> str:
+    """检查 ComfyUI 服务状态、队列、可用工作流与默认输出目录。
+
+    在批量生成前先调用它确认服务在线（否则所有生成工具都会报连接失败）。
+
+    Returns:
+        JSON 字符串：{ok, comfyui, reachable, system, queue, workflows, output_root}
+    """
+    info: dict[str, Any] = {
+        "comfyui": COMFYUI_URL,
+        "project_root": str(PROJECT_ROOT),
+        "workflow_dir": str(WORKFLOW_DIR),
+        "output_root": str(OUTPUT_ROOT),
+        "comfyui_root": str(_detect_comfyui_root()),
+        "workflows": {},
+    }
+    for key, fname in WORKFLOWS.items():
+        info["workflows"][key] = {
+            "file": fname,
+            "exists": (WORKFLOW_DIR / fname).exists(),
+        }
+    try:
+        stats = _http_json("/system_stats", method="GET", timeout=10)
+        queue = _http_json("/queue", method="GET", timeout=10)
+        info["reachable"] = True
+        info["system"] = {
+            "comfyui_version": stats.get("system", {}).get("comfyui_version"),
+            "python_version": stats.get("system", {}).get("python_version"),
+            "os": stats.get("system", {}).get("os"),
+            "devices": [
+                {
+                    "name": d.get("name"),
+                    "vram_total_gb": round((d.get("vram_total") or 0) / 1024 ** 3, 1),
+                    "vram_free_gb": round((d.get("vram_free") or 0) / 1024 ** 3, 1),
+                }
+                for d in stats.get("devices", [])
+            ],
+        }
+        info["queue"] = {
+            "running": len(queue.get("queue_running", [])),
+            "pending": len(queue.get("queue_pending", [])),
+        }
+    except Exception as e:
+        info["reachable"] = False
+        info["error"] = str(e)
+        info["hint"] = "启动 ComfyUI 后重试：python main.py --listen 127.0.0.1 --port 8188"
+    return _dump({"ok": info.get("reachable", False), **info})
+
+
+@mcp.tool()
+def comfyui_upload_image(image_path: str, target_name: Optional[str] = None) -> str:
+    """把本地图像上传/注册到 ComfyUI input 目录，供 LoadImage 使用。
+
+    当需要先确认参考图可用，或想复用一个上传后的文件名时可单独调用。
+
+    Args:
+        image_path: 本地图像路径（绝对路径或相对项目根）。
+        target_name: 在 ComfyUI input 中的目标文件名；留空自动生成
+            （含中文或空格的文件名会被自动改为 ASCII 名）。
+
+    Returns:
+        JSON 字符串：{ok, uploaded_as, comfyui_input_dir}
+    """
+    try:
+        name = _upload_image(image_path, target_name)
+        return _dump({
+            "ok": True,
+            "uploaded_as": name,
+            "comfyui_input_dir": str(_comfyui_input_dir()),
+        })
+    except Exception as e:
+        return _err(f"comfyui_upload_image 失败: {e}")
+
+
+@mcp.tool()
+def comfyui_get_result(prompt_id: str, output_dir: Optional[str] = None) -> str:
+    """按 prompt_id 取回异步任务结果（配合 `wait=False` 使用）。
+
+    Args:
+        prompt_id: 提交任务时返回的 prompt_id。
+        output_dir: 下载目录，默认 `OUTPUT/mcp_fetch`。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, files, ...}
+    """
+    try:
+        history = _http_json(f"/history/{prompt_id}", method="GET", timeout=30)
+        entry = history.get(prompt_id)
+        if not entry:
+            return _dump({"ok": False, "status": "not_found",
+                          "prompt_id": prompt_id,
+                          "hint": "任务可能仍在执行或 prompt_id 有误，可稍后重试。"})
+        status = (entry.get("status") or {}).get("status_str", "")
+        out_dir = _resolve_output_dir(output_dir, "mcp_fetch")
+        saved = _save_outputs(entry, out_dir)
+        return _dump({
+            "ok": bool(saved) or status == "success",
+            "status": status or ("success" if saved else "unknown"),
+            "prompt_id": prompt_id,
+            "output_dir": str(out_dir),
+            "files": saved,
+        })
+    except Exception as e:
+        return _err(f"comfyui_get_result 失败: {e}")
+
+
+if __name__ == "__main__":
+    mcp.run()

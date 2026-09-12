@@ -1,0 +1,230 @@
+# MCP 工具套件 · 《如愿·看见》（stem_fest 制作）
+
+把项目能力封装成 **2 个 MCP 服务器**，让 Cline 直接出图 / 出视频 / 配音 / 配乐 / 联网查资料，
+不再需要为每个镜头手写一次性 Python 脚本。
+
+| 服务器 | 名称 | 工具数 | 作用 | 依赖 |
+|--------|------|:------:|------|------|
+| `comfyui_mcp_server.py` | `comfyui-drama` | 11 | 驱动本机 ComfyUI 跑 8 条工作流 | ComfyUI 在线 + 模型就位 |
+| `web_search_mcp_server.py` | `web-search` | 6 | 免 API Key 联网搜索/抓正文 | 仅需 `ddgs`（免密钥） |
+
+```
+mcp_server/
+├── comfyui_mcp_server.py     # ① 短剧生产管线（图像/视频/语音/音乐）
+├── selftest.py               #    离线自检（无需 ComfyUI）
+├── comfyui_tools.md          #    ① 详解：参数、实测、约束、注入对照
+├── web_search_mcp_server.py  # ② 联网搜索（免密钥）
+├── web_search_selftest.py    #    离线自检（无需联网）
+├── web_search_tools.md       #    ② 详解：引擎、参数、用法
+└── README.md                 # 本文件（套件总览）
+```
+
+---
+
+## 1. 一键注册到 Cline
+
+编辑 `cline_mcp_settings.json`
+（Windows VS Code：`%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\cline_mcp_settings.json`）：
+
+```json
+{
+  "mcpServers": {
+    "comfyui-drama": {
+      "command": "py",
+      "args": [
+        "-3.10",
+        "E:\\code\\stem_fest\\mcp_server\\comfyui_mcp_server.py"
+      ],
+      "env": {
+        "COMFYUI_URL": "http://127.0.0.1:8188",
+        "COMFYUI_ROOT": "E:\\code\\ComfyUI",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "disabled": false,
+      "autoApprove": [],
+      "timeout": 1800
+    },
+    "web-search": {
+      "command": "py",
+      "args": [
+        "-3.10",
+        "E:\\code\\stem_fest\\mcp_server\\web_search_mcp_server.py"
+      ],
+      "env": {
+        "WEB_SEARCH_DEFAULT_REGION": "cn-zh",
+        "WEB_SEARCH_DEFAULT_BACKEND": "auto",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "disabled": false,
+      "autoApprove": [],
+      "timeout": 120
+    }
+  }
+}
+```
+
+- `timeout`：ComfyUI 建议 ≥ 1800（H3 视频单条 2-15 分钟）；搜索 120 足够。
+- **`COMFYUI_ROOT` 必须填对**（本机 `E:\code\ComfyUI`）。它优先级高于自动探测，填错会让
+  参考图回退写入错误目录；留空则自动探测（会按 `/internal/files/output` 反查真实根目录）。
+- 保存后**重启 Cline**（或重载 MCP 面板）即可在对话中直接调用这些工具。
+
+依赖（本机已验证可用）：
+
+```powershell
+pip install "mcp[cli]"        # MCP SDK，已验证 1.26.0
+pip install ddgs              # 搜索服务器，已验证 9.16.0（免 API Key）
+pip install beautifulsoup4 lxml   # 可选：fetch_page 的 HTML 回退路径
+```
+
+---
+
+## 2. 运行前提与作用域（是否依赖 cwd / PATH）
+
+结论：**不依赖当前工作目录；注册一次后每次启动 Cline 都可用**，但要满足几个运行前提。
+
+### 2.1 不依赖 cwd（已实测）
+
+两个服务器内部所有路径都由 `__file__` 推导，从不读取 `os.getcwd()`。
+实测：`cd C:\Windows` 后启动，仍然得到
+
+```
+PROJECT_ROOT : E:\code\stem_fest
+WORKFLOW_DIR : E:\code\stem_fest\workflows   (8 个工作流齐备)
+OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
+相对 output_dir → 落在项目内；相对参考图 ASSETS/... 正常上传
+```
+
+换句话说：**无论 Cline 在哪个目录、打开哪个文件夹，工具都可用**，
+相对路径（`output_dir`、参考图路径）一律按**项目根**解析，而不是按 cwd。
+
+### 2.2 配置是全局的，不在仓库里
+
+`cline_mcp_settings.json` 位于
+`%APPDATA%\Code\User\globalStorage\saoudrizwan.claude-dev\settings\`，
+即**所有 VS Code 工作区共用**、且**不受 git 影响**（不随仓库提交/切换分支变化）。
+仓库内没有工作区级 MCP 配置（已确认无 `.vscode/mcp.json`、无 `.cline/`）。
+
+### 2.3 解释器绑定：为什么用 `py -3.10`
+
+| 写法 | 可靠性 |
+|------|--------|
+| `"command": "python"` | 一般。依赖 PATH 顺序；若从"已激活 venv/conda 的终端"启动 VS Code，`python` 会变成那个环境 → `No module named mcp` |
+| `"command": "py", "args": ["-3.10", ...]` ✅ **当前配置** | 高。`py.exe` 固定在 `C:\WINDOWS\py.exe`（系统 PATH），由 Python Launcher 按版本注册表解析 `-3.10`，不受 PATH 顺序与 venv 影响 |
+| 绝对路径 `D:\Python310\python.exe` | 最高（完全不查 PATH），但 Python 升级/移动后需改配置 |
+
+> 换机器或换了 Python 版本时，把 `-3.10` 改成对应版本（`py -0` 可列出本机所有版本）。
+
+### 2.4 每次使用时的运行前提
+
+| 前提 | 影响的服务器 | 检查方式 |
+|------|--------------|----------|
+| Python 环境含 `mcp`（及 `ddgs`） | 两者 | `py -3.10 -c "import mcp, ddgs; print('ok')"` |
+| ComfyUI 在本机运行 | `comfyui-drama` | `comfyui_status` → `reachable: true` |
+| 能访问外网 | `web-search` | `search_status(live_probe=true)` |
+| 项目仍在 `E:\code\stem_fest` | `comfyui-drama` | 移动目录后需改 `args` 与 `COMFYUI_ROOT` |
+
+`web-search` 不依赖本项目任何文件，可整段复制到别的项目直接复用。
+
+### 2.5 会失效的场景（唯一需要重新注册的情况）
+
+1. **移动/重命名项目目录** → 改 `args` 里的脚本路径（两处）。
+2. **卸载或更换 Python**，或新版本没装 `mcp`/`ddgs` → 改 `-3.10` 并补装依赖。
+3. **ComfyUI 未启动**（不是配置问题，是运行前提）→ 工具会返回带 `hint` 的明确错误。
+4. **在其它机器上** → `cline_mcp_settings.json` 不随仓库走，需重新注册一次（配置可直接复制）。
+
+---
+
+## 3. 工具索引
+
+### ① comfyui-drama — 生产管线（11 个）
+
+| 工具 | 工作流 | 用途 |
+|------|--------|------|
+| `z_image_turbo_t2i` | `Z-Image-Turbo 文生图.json` | 文生图（场景 / 道具 / UI / 群像） |
+| `image_edit_longcat` | `Image Edit (LongCat Image Edit).json` | 图像编辑 · **角色一致性**（定妆照 → 新场景）· 首选 |
+| `image_edit_firered` | `image_firered_image_edit1_1.json` | 图像编辑 · **角色一致性** · 与 LongCat 互为**备选**（`lightning=True` 时 8 步，默认 40 步） |
+| `video_minimax_h3_i2v` | `video_minimax_h3_i2v.json` ⭐ | 图生视频（含环境音） |
+| `video_minimax_h3_r2v` | `video_minimax_h3_r2v.json` ⭐ | 参考图生视频 · 角色锁定（≤2 张参考图） |
+| `video_minimax_h3_t2v` | `video_minimax_h3_t2v.json` | 文生视频（UI 动画 / 无角色镜头） |
+| `qwen3_tts` | `Qwen3-TTS 语音合成.json` | 角色配音 / 旁白 |
+| `ace_step_t2audio` | `ACE-Step 1.5 文生音频.json` | 配乐 BGM / 合成音效 |
+| `comfyui_status` | — | 服务 / 队列 / 显存 / 工作流文件检查 |
+| `comfyui_upload_image` | — | 上传参考图到 ComfyUI `input` |
+| `comfyui_get_result` | — | 按 `prompt_id` 取回异步结果 |
+
+→ 详见 **[comfyui_tools.md](comfyui_tools.md)**
+
+### ② web-search — 免密钥联网搜索（6 个）
+
+| 工具 | 用途 |
+|------|------|
+| `web_search` | 通用网页搜索（多引擎轮换，中英文均可） |
+| `search_news` | 新闻搜索（含日期与来源） |
+| `search_images` | 图片搜索（返回原图/缩略图直链） |
+| `wiki_lookup` | 维基百科检索 + 首段摘要（稳定可靠） |
+| `fetch_page` | 抓取网页正文（markdown，支持 offset 续读） |
+| `search_status` | 依赖版本 / 可用引擎 / 默认参数 / 实时探测 |
+
+→ 详见 **[web_search_tools.md](web_search_tools.md)**
+
+---
+
+## 4. 自检
+
+```powershell
+python mcp_server/selftest.py              # ComfyUI 套件（离线，不需要 ComfyUI 在线）
+python mcp_server/web_search_selftest.py   # 搜索套件（离线，不需要联网）
+```
+
+两个自检都拦截真实网络/ComfyUI 调用，只校验 **工具注册 + 参数注入 + 结果整形 + 错误路径**，
+CI 或改代码后可随时跑。当前状态：**全部通过**。
+
+---
+
+## 5. 实测验证速览
+
+### comfyui-drama（2026-09-11，ComfyUI 0.33.0 / RTX 4090 Laptop 16GB）
+
+2026-09-11 的 7 条工作流全部真实跑通并落盘（产物在 `OUTPUT/mcp_smoke/`）：
+
+| 工具 | 实测产物规格 |
+|------|--------------|
+| `z_image_turbo_t2i` | PNG 768×768 RGB（与请求尺寸一致） |
+| `image_edit_longcat` | PNG 1360×768 RGB（定妆照竖构图按 1MP 等比） |
+| `qwen3_tts` | FLAC 24 kHz 单声道 4.0 s |
+| `ace_step_t2audio` | MP3 48 kHz 立体声 **15.0 s**（= `duration`） |
+| `video_minimax_h3_i2v` | MP4 h264 864×480@24fps + **AAC 32kHz 立体声** |
+| `video_minimax_h3_r2v` | MP4 h264 864×480@24fps + AAC 立体声 |
+| `video_minimax_h3_t2v` | MP4 h264 864×480@24fps + AAC 立体声 |
+
+> ℹ️ 上表是 **2026-09-11 的 7 条**实测记录。第 8 条（**FireRed Image Edit 1.1**）于 **2026-09-12** 加入：
+> 已由 `selftest.py` 的 `[3b]` 用例覆盖参数注入（steps/cfg 走 Switch + Primitive*），
+> 并已真实跑通（ComfyUI `/history` 可见 `TextEncodeQwenImageEditPlus` + `qwen_image_vae` 的成功执行）。
+
+### web-search（同日，免密钥）
+
+`web_search`（中/英）、`search_news`、`search_images`、`wiki_lookup`、
+`fetch_page`（单页抓到 62,998 字符，offset 续读正常）均返回真实结果。
+
+---
+
+## 6. 常见问题
+
+| 现象 | 原因 / 解决 |
+|------|-------------|
+| `comfyui_status` 返回 `reachable:false` | ComfyUI 没启动；`python main.py --listen 127.0.0.1 --port 8188` |
+| 生成工具报 `ok:false` 但带 `prompt_id` | 等待超时（任务仍在跑）；用 `comfyui_get_result(prompt_id=...)` 取回 |
+| 参考图无效 / 脸不一致 | 走 `image_edit_longcat` 并传定妆照；确认 `COMFYUI_ROOT` 正确 |
+| 文生图慢到 ~100 s/step | 多为**首个任务的模型冷加载**（16 GB 模型权重流式加载）。2026-09-12 已从 `launch_comfyui.bat` 去掉 `--lowvram --disable-pinned-memory`，启动日志应为 `NORMAL_VRAM` + 已启用 pinned memory；若仍慢，先确认是否冷加载、以及 ComfyUI 是否需先释放模型缓存 |
+| 搜索报"所有搜索引擎均未返回结果" | 触发风控或网络受限；换个 query/`backend`，或稍后重试 |
+| 搜索提示缺 `ddgs` | `pip install ddgs` |
+
+---
+
+## 7. 设计原则（改代码前先读）
+
+1. **工具返回统一 JSON 字符串**：`{"ok": bool, ...}`；失败必带 `error` 字段，绝不抛裸异常给模型。
+2. **参数注入按 `class_type` 匹配节点**，与 `workflows/*.json` 的节点结构解耦，工作流微调不致失效。
+3. **可复现**：`seed=-1` 表示随机，但一定把**实际使用的 seed** 回传，便于复刻与前后的镜头对齐。
+4. **长任务可异步**：`wait=False` 先拿 `prompt_id`，避免 MCP 调用超时；配套取回工具。
+5. **不引入必需的新依赖**（除 `ddgs`）；搜索侧对 `ddgs` 缺失、引擎失效均有降级与明确提示。

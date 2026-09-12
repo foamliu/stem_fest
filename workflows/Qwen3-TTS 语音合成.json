@@ -1,0 +1,62 @@
+{
+  "5": {
+    "inputs": {
+      "repo_id": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+      "source": "HuggingFace",
+      "precision": "bf16",
+      "attention": "auto",
+      "local_model_path": ""
+    },
+    "class_type": "Qwen3Loader",
+    "_meta": {
+      "title": "Qwen3-TTS Loader"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": "各位朋友，今天要给大家推荐的，是我们团队打磨了整整一年的重磅新品——它不只是在解决一个问题，而是在彻底改变一种生活方式。⏸️（稍作停顿）你可能会觉得，市面上同类产品那么多，凭什么选它？我来告诉你三个你无法拒绝的理由。第一，它的核心算法比上一代提升了四倍效率，这意味着你每天能省下至少两个小时；第二，它独创的智能温控系统，让稳定性达到了百分之九十九点九；第三，也是最重要的一点——它不需要你改变任何使用习惯，上手就能用。⏸️（稍作停顿）我知道你心里在想什么：价格会不会很贵？今天，就在今天，首发价直接砍掉三分之一，还附赠全年免费升级服务。⏸️（稍作停顿，语气上扬）但我要提醒你，这个优惠只限前五百名下单的用户——所以，别再犹豫了，现在就点击下方链接，把这份高效和从容带回家！",
+      "language": "Auto",
+      "speaker": "Serena",
+      "seed": 321490827058714,
+      "instruct": "一位温柔亲切的年轻女性。如果用更具体的关键词来描述，她的声音特质是温暖、柔和，在官方的音色列表中，其中文名甚至直接被标注为“苏瑶”。",
+      "custom_speaker_name": "",
+      "max_new_tokens": 2048,
+      "model": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "Qwen3CustomVoice",
+    "_meta": {
+      "title": "Qwen3-TTS Custom Voice"
+    }
+  },
+  "7": {
+    "inputs": {
+      "audioUI": "",
+      "audio": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "PreviewAudio",
+    "_meta": {
+      "title": "预览音频"
+    }
+  },
+  "8": {
+    "inputs": {
+      "filename_prefix": "audio/ComfyUI",
+      "format": "flac",
+      "audioUI": "",
+      "audio": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "SaveAudioAdvanced",
+    "_meta": {
+      "title": "Save Audio (Advanced)"
+    }
+  }
+}

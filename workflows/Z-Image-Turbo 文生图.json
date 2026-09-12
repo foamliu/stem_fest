@@ -1,0 +1,139 @@
+{
+  "63": {
+    "inputs": {
+      "images": [
+        "62:8",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "62:30": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "62:29": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "62:8": {
+    "inputs": {
+      "samples": [
+        "62:3",
+        0
+      ],
+      "vae": [
+        "62:29",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "62:28": {
+    "inputs": {
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "62:13": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "空Latent图像（SD3）"
+    }
+  },
+  "62:11": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "62:28",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "62:27": {
+    "inputs": {
+      "text": "A young woman in a cozy coffee shop, reading a book by the window, soft morning light streaming through curtains, shot on Canon EOS R5, 85mm portrait lens, shallow depth of field, warm golden tones, highly detailed, 8k, photorealistic.",
+      "clip": [
+        "62:30",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "62:33": {
+    "inputs": {
+      "conditioning": [
+        "62:27",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "62:3": {
+    "inputs": {
+      "seed": 462872735410649,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "62:11",
+        0
+      ],
+      "positive": [
+        "62:27",
+        0
+      ],
+      "negative": [
+        "62:33",
+        0
+      ],
+      "latent_image": [
+        "62:13",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "K采样器"
+    }
+  }
+}
