@@ -337,6 +337,11 @@ stem_fest/
 > prompt 用 `CUT 1:` 写 景别+动作+**Audio（含台词原文）**｜`seed 1101` / `megapixels 0.6` / `steps 4` →
 > 产物 `video/mirror015_liu_siqi_r2v_00001_.mp4`（1056×608@24fps，5.17 s，AAC 32 kHz 立体声，**199 s**）。
 > 完整规范与踩坑见 `ASSETS/CHARACTERS/01_liu_siqi/README.md` §4 / §5 / §6。
+>
+> 🔎 **参考图不要求 16:9（2026-09-13 核实）**：R2V 工作流里**没有缩放/裁切节点**
+> （`LoadImage → MiniMaxH3ReferenceToVideo`，`ref_image_size = match`），画幅由 `ResolutionSelector` 决定
+> ⇒ **头肩特写 / 竖版 / 16:9 都能直接当 `<Picture 1>`**。16:9 只是 **LongCat 图生图**那一步的约束
+> （`LoadImage → ImageScaleToTotalPixels` ⇒ 输出画幅＝参考图画幅）。
 
 > ✅ **小样已完成（2026-09-12）—— 镜 15 全链路跑通**，产物在 `OUTPUT/04_classroom_dusk/`：
 > | 步 | 产物 | 实测规格 | 耗时 |
@@ -452,7 +457,7 @@ stem_fest/
 | 10 | 缺失：四人合影参考图 | `CHARACTERS/_group/four_students_hero_v01.png`，四人同框镜头（9/10/22/46/52/59/81/89/113/118/134，共 11 镜）需要。⚠️ **已升级为 P0 #19**（R2V 只有 2 个参考图位，多人镜必须合成参考图） |
 | 16 | ~~镜 15 的视频一步~~ | ✅ **已完成并验收 2026-09-12**：改走 **H3 R2V**（本项目今后统一路线，I2V 弃用）→ `video/mirror015_liu_siqi_r2v_00001_.mp4`（1056×608@24fps，5.17 s，AAC 32 kHz 立体声，**199 s**）。参考图 = 定版 16:9 单人图 + `04_classroom_dusk` 场景图；台词写进 prompt。**✅ 画面已由用户验收"还可以"**；⚠️ 仅剩音频层待处理：**H3 没生成环境音**（前后段 ≈ −50 dB），台词落在 2.5–4.0 s，需后期铺环境音/BGM |
 | 17 | ~~排查 `image_edit_firered` **纯黑图**~~ | ❌ **已关闭（2026-09-13 美术方定案）**：图生图一律用 `image_edit_longcat`，**FireRed 弃用、不再排查、不做比较**。原 3/3 黑图证据保留在 `ASSETS/CHARACTERS/01_liu_siqi/README.md` §6.5 作历史记录。⚠️ 遗留教训仍有效：**所有生成都要查像素/体积验收**（静默失败会返回 `ok:true`） |
-| 18 | 把镜 15 定版配方推广到其他 6 位角色 | 每位先做一张 **16:9 单人参考图**（整宽裁切，脸占图高 ≥35%）＋ prompt 写死景别＋`megapixels 1.5`；裁切脚本待固化（P2 #12） |
+| 18 | ~~把镜 15 定版配方推广到其他 6 位角色~~ | ⚠️ **部分完成（2026-09-13），且原前提被推翻**：<br>① **R2V 不要求参考图是 16:9** —— 核实 `video_minimax_h3_r2v.json`：**没有任何缩放/裁切节点**（`LoadImage → MiniMaxH3ReferenceToVideo`，`ref_image_size = match`），画幅由 `ResolutionSelector(16:9 / 0.4MP)` 决定 ⇒ 参考图用什么比例都行。**16:9 只是 LongCat 图生图那一步的约束**（其输出画幅＝参考图画幅）。<br>② 据此产出 **3 张 16:9 单人参考图**（脚本 `OUTPUT/_diag_ref16x9_build.py`，报告 `OUTPUT/_ref16x9_build.txt`）：`02_liu_sicheng/…_closeup_v01_16x9.png`(2304×1296)、`05_huang_jiguang/…`(1664×936)、`06_yuan_longping/…`(1829×1029)。<br>③ **03 徐畅景 / 04 张书扬 / 07 钟南山 不做 16:9 版**：定妆照是**头肩特写**（脸占图高 36–47%），16:9 窗高上限＝宽×9/16（864/972/495 px）**装不下脸**（必然切脸）⇒ 这三位**直接用现成头肩特写当 `<Picture 1>`**。<br>④ ⚠️ **脸位测量不可全信**：本地视觉模型的位置法重复测量可差 30+ 个百分点（02 的"下巴"两次读到 60% / 42.5%）⇒ 构图**必须人工目视复核**；要精确脸框建议装 `opencv-python-headless`（尚未安装）。<br>⑤ 剩余：**多人合影（见 P0 #19）** 与 **4 位配角定妆照（P1 #7）** |
 
 ### P2 — 收尾 / 卫生
 
