@@ -83,7 +83,7 @@
 | 项 | 值 |
 |----|-----|
 | 造型基串 prompt | 同一位初中女生，黑色中长发扎马尾，细框眼镜，白色短袖 Polo 衫（领口红色装饰），黑色长裤，红领巾<br>ⓘ **由 qwen3.5 读定妆照 v01 得出**；只写可见特征，**不写体型/脸型/年龄** |
-| 工具 | **`image_edit_longcat`**（`image` = `ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_closeup_v02_16x9.png`）｜🔒 **图生图一律用 LongCat**（2026-09-13 美术方定案）；`image_edit_firered` **本项目弃用**（3 次运行全产出纯黑图，见 §6.5） |
+| 工具 | **`image_edit_longcat`**（`image` = `ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_closeup_v02_16x9.png`）｜🔒 **图生图一律用 LongCat**（2026-09-13 美术方定案，这是本项目**唯一**图生图工具）；🚫 `image_edit_firered` **已于 2026-09-13 从 MCP 工具列表删除**（5/5 纯黑图、零成功率，见 §6.5） |
 | 固定 seed | **1101**（镜 15 定版，实测 211 s 出图；**定下后不要改**） |
 | megapixels | **1.5** → 输出 1680×944。⚠️ 默认 1.0 会得到 1360×768，脸同比更小 |
 | ★ 必须写景别 | prompt 必须含"**近景半身，人物占画面高度约三分之二**"。原因：工作流 `KSampler.denoise = 1.0`，**参考图不作为底图**，构图/景别/人物大小 100% 由 prompt 文字决定；不写 → 模型自己拍成中景 → 脸只剩 ~132 px |
@@ -173,19 +173,23 @@ output_dir: OUTPUT/tts
 
 "最外侧 6 列拉伸"补出来的 2×384 px 竖带是非自然纹理，模型会当成画面元素。**能整宽裁就别补边。**
 
-### 6.5 ⚠️ `image_edit_firered` 产出纯黑图（3/3，而 ComfyUI 报 success）
+### 6.5 🚫 `image_edit_firered` 产出纯黑图（累计 5/5，而 ComfyUI 报 success）→ 工具已被删除
 
 | 运行 | 开关 | 产物 | 判定 |
 |---|---|---|---|
 | `mirror015_liu_siqi_firered_v01`（20:11） | 40 步 / CFG 4 | 1360×768，9.3 KB | `mean=0.0` **纯黑** |
 | `..._v12_firered15`（耗时 26.5 min） | 40 步 / CFG 4 | 1672×936，10.7 KB | `mean=0.0` **纯黑** |
 | `..._v13_firered8` | 8 步 / CFG 1 | 1672×936，10.7 KB | **纯黑** |
+| `extra08_young_soldier_v03_nolp`（2026-09-13，局部编辑去领章） | 40 步 / CFG 4 | 880×1176，7.9 KB | `mean=0.0` **纯黑** |
+| `extra11_soldiers_v01_nolp`（2026-09-13，局部编辑去领章） | 40 步 / CFG 4 | 1360×768，8.0 KB | `mean=0.0` **纯黑** |
 
 → **静默失败**：工具照常返回 `ok:true` + 文件名。**必须以像素验收**（`np.asarray(im).mean() == 0` 即废）或看体积（正常 ≈1.5 MB）。
-→ 目前**不要用 FireRed**；待排查方向：`qwen_image_vae` 与 `CLIPLoader(type=qwen_image)` 的搭配、`CFGNorm`、`ModelSamplingAuraFlow(shift=3.1)`。
+→ 历史排查方向（已不再跟进）：`qwen_image_vae` 与 `CLIPLoader(type=qwen_image)` 的搭配、`CFGNorm`、`ModelSamplingAuraFlow(shift=3.1)`。
 
-> 🔒 **定案（2026-09-13，美术方指示）：本项目图生图一律用 `image_edit_longcat`，FireRed 弃用、不再排查、不做 A/B 比较。**
-> 本项**就此关闭**；上面三条黑图证据仅作历史记录。若日后真要复活 FireRed，再按上面的排查方向走。
+> 🔒 **定案（2026-09-13，美术方指示，二次确认）：本项目图生图一律用 `image_edit_longcat`；
+> `image_edit_firered` 在 5 次运行中**一次成功都没有**，故**已从 MCP 工具列表整体删除**
+> （工具函数、`WORKFLOWS["firered"]` 注册项、`selftest.py` `[3b]` 用例全部移除）——不再排查、不做 A/B 比较。
+> 上表 5 条黑图证据仅作历史记录；`workflows/image_firered_image_edit1_1.json` 留档、无工具指向。
 
 ### 6.6 R2V 直出视频（★ 本项目统一路线，I2V 弃用）
 

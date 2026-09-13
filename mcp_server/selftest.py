@@ -68,11 +68,12 @@ def main() -> int:
     tools = sorted(t.name for t in srv.mcp._tool_manager.list_tools())
     expected = [
         "ace_step_t2audio", "comfyui_get_result", "comfyui_status",
-        "comfyui_upload_image", "image_edit_firered", "image_edit_longcat",
+        "comfyui_upload_image", "image_edit_longcat",
         "qwen3_tts", "video_minimax_h3_i2v", "video_minimax_h3_r2v",
         "video_minimax_h3_t2v", "z_image_turbo_t2i",
     ]
-    _check("工具数量 = 11", len(tools) == 11, f"实际 {len(tools)}: {tools}")
+    _check("工具数量 = 10（FireRed 已于 2026-09-13 移除）", len(tools) == 10,
+           f"实际 {len(tools)}: {tools}")
     for name in expected:
         _check(f"已注册 {name}", name in tools)
     for key, fname in srv.WORKFLOWS.items():
@@ -109,33 +110,8 @@ def main() -> int:
     _check("负向 prompt 注入第二个 TextEncodeQwenImageEdit",
            te[1]["prompt"] == "different face")
 
-    # 3b. FireRed Image Edit（参数注入点与 LongCat 不同：steps/cfg 走 Switch + Primitive*）
-    print("\n[3b] image_edit_firered")
-    res, wf = call(srv.image_edit_firered, prompt="same girl at a desk",
-                   image="ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_hero_v01.png",
-                   negative_prompt="different face", seed=200, megapixels=1.0,
-                   lightning=True, steps=8, cfg=1.0)
-    _check("提交成功", res.get("ok") is True, str(res))
-    _check("LoadImage 注入参考图", inputs_of(wf, "LoadImage")[0]["image"] == "ref_test.png")
-    _check("megapixels 注入 ResizeImageMaskNode",
-           inputs_of(wf, "ResizeImageMaskNode")[0]["resize_type.megapixels"] == 1.0)
-    _check("seed 注入 KSampler", inputs_of(wf, "KSampler")[0]["seed"] == 200)
-    _check("lightning 注入 PrimitiveBoolean",
-           inputs_of(wf, "PrimitiveBoolean")[0]["value"] is True)
-    _check("steps 注入 PrimitiveInt",
-           all(n["value"] == 8 for n in inputs_of(wf, "PrimitiveInt")))
-    _check("cfg 注入 PrimitiveFloat",
-           all(n["value"] == 1.0 for n in inputs_of(wf, "PrimitiveFloat")))
-    te = inputs_of(wf, "TextEncodeQwenImageEditPlus")
-    _check("正向 prompt 注入首个 TextEncodeQwenImageEditPlus",
-           te[0]["prompt"] == "same girl at a desk")
-    _check("负向 prompt 注入第二个 TextEncodeQwenImageEditPlus",
-           te[1]["prompt"] == "different face")
-    _check("SaveImage 前缀",
-           "firered_edit/" in inputs_of(wf, "SaveImage")[0]["filename_prefix"])
-    _check("返回值含 lightning/steps/cfg",
-           res.get("lightning") is True and res.get("steps") == 8 and res.get("cfg") == 1.0,
-           str(res))
+    # 3b. FireRed Image Edit —— 🚫 **已于 2026-09-13 整体移除**（5/5 次运行产出纯黑图，
+    #     零成功率；本项目图生图一律用 image_edit_longcat）。原参数注入用例随之删除。
 
     # 4. Qwen3-TTS
     print("\n[4] qwen3_tts")
@@ -220,7 +196,8 @@ def main() -> int:
     _check("comfyui_status 返回结构完整",
            "workflows" in status and "reachable" in status, str(status)[:200])
     _check("所有工作流可被 status 列出",
-           len(status.get("workflows", {})) == 8, str(status.get("workflows")))
+           len(status.get("workflows", {})) == len(srv.WORKFLOWS),
+           str(status.get("workflows")))
 
     print("\n" + "=" * 68)
     if FAILURES:

@@ -6,8 +6,7 @@
 
   🖼️ 图像层
     z_image_turbo_t2i        Z-Image-Turbo 文生图.json
-    image_edit_longcat       Image Edit (LongCat Image Edit).json   (角色一致性·首选)
-    image_edit_firered       image_firered_image_edit1_1.json       (已弃用 · 图生图一律用 LongCat)
+    image_edit_longcat       Image Edit (LongCat Image Edit).json   (角色一致性·唯一图生图工具)
   🎬 视频层
     video_minimax_h3_i2v     video_minimax_h3_i2v.json   ⭐ 首选
     video_minimax_h3_r2v     video_minimax_h3_r2v.json   ⭐ 角色锁定
@@ -63,7 +62,7 @@ COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188").rstrip("/")
 WORKFLOWS: dict[str, str] = {
     "t2i": "Z-Image-Turbo 文生图.json",
     "image_edit": "Image Edit (LongCat Image Edit).json",
-    "firered": "image_firered_image_edit1_1.json",
+    # 🚫 "firered": 已于 2026-09-13 **整体移除**（5/5 次运行产出纯黑图，零成功率）
     "tts": "Qwen3-TTS 语音合成.json",
     "ace": "ACE-Step 1.5 文生音频.json",
     "h3_i2v": "video_minimax_h3_i2v.json",
@@ -543,103 +542,20 @@ def image_edit_longcat(
         return _err(f"image_edit_longcat 失败: {e}")
 
 # ══════════════════════════════════════════════════════════════════
-# 🖼️ 图像层 · FireRed-Image-Edit 1.1（Qwen-Image-Edit 血统）
+# 🚫 图像层 · FireRed-Image-Edit 1.1 —— **已于 2026-09-13 整体移除**
 # ══════════════════════════════════════════════════════════════════
-@mcp.tool()
-def image_edit_firered(
-    prompt: str,
-    image: str,
-    negative_prompt: str = "",
-    seed: int = -1,
-    megapixels: float = 1.0,
-    lightning: bool = False,
-    steps: Optional[int] = None,
-    cfg: Optional[float] = None,
-    filename_prefix: Optional[str] = None,
-    output_dir: Optional[str] = None,
-    wait: bool = True,
-    timeout_seconds: int = 1800,
-) -> str:
-    """Image Edit · FireRed-Image-Edit-1.1（工作流 `image_firered_image_edit1_1.json`）。
+# 移除依据（美术方 2026-09-13 指示 + 运行时证据）：该模型在本机 **5 次运行 5 张纯黑图**，
+# **零成功率**，且 ComfyUI 每次均报 `success`（静默失败）：
+#   v01  40 步 / CFG 4        1360×768   9.3 KB   mean=0.0
+#   v12  40 步 / CFG 4        1672×936  10.7 KB   mean=0.0（耗时 26.5 min）
+#   v13   8 步 / CFG 1        1672×936  10.7 KB   mean=0.0（Lightning）
+#   extra08_young_soldier_v03_nolp   880×1176   7.9 KB   mean=0.0
+#   extra11_soldiers_v01_nolp       1360×768   8.0 KB   mean=0.0
+# ⇒ 工具与 `WORKFLOWS["firered"]` 注册项一并删除（不再出现在工具列表中）。
+# ⇒ **本项目图生图（角色一致性）唯一工具：`image_edit_longcat`**，不做 A/B 比较。
+# 历史证据保留在 `ASSETS/CHARACTERS/01_liu_siqi/README.md` §6.5，工作流文件
+# `workflows/image_firered_image_edit1_1.json` 仅作留档、无任何工具指向它。
 
-    用途与 `image_edit_longcat` **完全相同**（角色一致性：定妆照 → 新场景分镜图），
-    只是底层换成另一套模型：**FireRed-Image-Edit 1.1**（Qwen-Image-Edit 血统；
-    CLIP 用 `qwen_2.5_vl_7b`，VAE 用 `qwen_image_vae`）。
-
-    两个工具**互为备选**：同一张定妆照 + 同一段 prompt 各跑一次，取更像本人的那版。
-
-    ⚠️ **画风取决于提示词，不取决于用哪个模型**：国内 AI 短剧（如《万妖图录传》）的通行做法是
-    在提示词里**显式写明"国风 / 东方审美 / 中国动画"**；只写泛泛的"3D 动画风格"，
-    本片已定案为**超写实真人质感**，风格后缀（正向 + 负向）见
-    **`ASSETS/STYLE/README.md` 的「★ 全片风格基准」** —— 出图必带。
-
-    Args:
-        prompt: 编辑/重绘描述（如"同一位女生坐在傍晚的课桌前，中景"）。
-        image: 参考图路径（定妆照），自动上传到 ComfyUI input。
-        negative_prompt: 负面描述（该工作流原本留空）。
-        seed: 随机种子；-1 = 随机（同角色建议固定 seed）。
-        megapixels: 参考图缩放总像素（百万），默认 1.0。
-        lightning: True = 启用 Lightning LoRA（**8 步**快速模式）；False = 完整 **40 步**（默认）。
-        steps: 显式指定采样步数；None = 沿用工作流按 lightning 决定的 40 / 8。
-        cfg: 显式指定 CFG；None = 沿用工作流按 lightning 决定的 4 / 1。
-        filename_prefix: 保存前缀，默认 `firered_edit/<时间戳>`。
-        output_dir: 输出目录，默认 `OUTPUT/image_edit`。
-        wait: True 阻塞等待；False 仅提交。
-        timeout_seconds: 等待超时秒数。
-
-    Returns:
-        JSON 字符串：{ok, status, prompt_id, seed, reference_image, lightning, steps, cfg, files, ...}
-    """
-    try:
-        seed_used = _pick_seed(seed)
-        ref_name = _upload_image(image)
-        wf = _load_workflow("firered")
-
-        _set_inputs(wf, "LoadImage", image=ref_name)
-        # 注意：该工作流用 ResizeImageMaskNode 缩放，参数名**带点**
-        _set_inputs(wf, "ResizeImageMaskNode",
-                    **{"resize_type.megapixels": float(megapixels)})
-        _set_inputs(wf, "KSampler", seed=seed_used)
-        # Lightning LoRA 开关：PrimitiveBoolean → ComfySwitchNode 决定 steps/cfg
-        _set_inputs(wf, "PrimitiveBoolean", value=bool(lightning))
-
-        steps_used = 8 if lightning else 40
-        cfg_used = 1.0 if lightning else 4.0
-        # 该工作流的 steps / cfg 走 Switch + Primitive* 节点，**不能直接写 KSampler**
-        if steps is not None:
-            _set_inputs(wf, "PrimitiveInt", value=int(steps))
-            steps_used = int(steps)
-        if cfg is not None:
-            _set_inputs(wf, "PrimitiveFloat", value=float(cfg))
-            cfg_used = float(cfg)
-
-        # 两个 TextEncodeQwenImageEditPlus：node id 小的为正向
-        encoders = sorted(
-            ((nid, n) for nid, n in wf.items()
-             if n.get("class_type") == "TextEncodeQwenImageEditPlus"),
-            key=lambda x: x[0],
-        )
-        if encoders:
-            encoders[0][1]["inputs"]["prompt"] = prompt.strip()
-        if len(encoders) > 1:
-            encoders[1][1]["inputs"]["prompt"] = negative_prompt.strip()
-
-        prefix = filename_prefix or f"firered_edit/{_now()}"
-        # 该工作流**已自带 SaveImage**（不是 PreviewImage），直接改前缀
-        _set_inputs(wf, "SaveImage", filename_prefix=prefix)
-
-        out_dir = _resolve_output_dir(output_dir, "image_edit")
-        return _run(wf, out_dir, wait, timeout_seconds, {
-            "tool": "image_edit_firered",
-            "workflow": WORKFLOWS["firered"],
-            "seed": seed_used,
-            "reference_image": ref_name,
-            "lightning": bool(lightning),
-            "steps": steps_used,
-            "cfg": cfg_used,
-        })
-    except Exception as e:
-        return _err(f"image_edit_firered 失败: {e}")
 
 
 # ══════════════════════════════════════════════════════════════════

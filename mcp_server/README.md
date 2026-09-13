@@ -141,8 +141,7 @@ OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
 | 工具 | 工作流 | 用途 |
 |------|--------|------|
 | `z_image_turbo_t2i` | `Z-Image-Turbo 文生图.json` | 文生图（场景 / 道具 / UI / 群像） |
-| `image_edit_longcat` | `Image Edit (LongCat Image Edit).json` | 图像编辑 · **角色一致性**（定妆照 → 新场景）· 首选 |
-| `image_edit_firered` | `image_firered_image_edit1_1.json` | 图像编辑 · **角色一致性** · 与 LongCat 互为**备选**［⚠️ **本项目已弃用（2026-09-13）**］（`lightning=True` 时 8 步，默认 40 步） |
+| `image_edit_longcat` | `Image Edit (LongCat Image Edit).json` | 图像编辑 · **角色一致性**（定妆照 → 新场景）· **本项目唯一图生图工具** |
 | `video_minimax_h3_i2v` | `video_minimax_h3_i2v.json` ⭐ | 图生视频（含环境音） |
 | `video_minimax_h3_r2v` | `video_minimax_h3_r2v.json` ⭐ | 参考图生视频 · 角色锁定（≤2 张参考图） |
 | `video_minimax_h3_t2v` | `video_minimax_h3_t2v.json` | 文生视频（UI 动画 / 无角色镜头） |
@@ -197,9 +196,9 @@ CI 或改代码后可随时跑。当前状态：**全部通过**。
 | `video_minimax_h3_r2v` | MP4 h264 864×480@24fps + AAC 立体声 |
 | `video_minimax_h3_t2v` | MP4 h264 864×480@24fps + AAC 立体声 |
 
-> ℹ️ 上表是 **2026-09-11 的 7 条**实测记录。第 8 条（**FireRed Image Edit 1.1**）于 **2026-09-12** 加入：
-> 已由 `selftest.py` 的 `[3b]` 用例覆盖参数注入（steps/cfg 走 Switch + Primitive*），
-> 并已真实跑通（ComfyUI `/history` 可见 `TextEncodeQwenImageEditPlus` + `qwen_image_vae` 的成功执行）。
+> 🚫 **原第 8 条 FireRed Image Edit 1.1 —— 工具已删除（2026-09-13）**。2026-09-12 加入时只验证了
+> 参数注入与节点执行；**产物 5/5 全部纯黑（mean=0.0）** 却返回 `ok:true` ⇒ 零成功率，已整体移除。
+> 教训：**"ComfyUI 报 success" ≠ "产物可用"**，验收必须查像素或体积。
 
 ### web-search（同日，免密钥）
 

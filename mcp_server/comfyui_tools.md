@@ -1,7 +1,12 @@
 # comfyui-drama MCP 服务器 · 短剧生产管线
 
-把 `workflows/` 下的 8 条 ComfyUI 工作流封装成 MCP 工具，让 Cline 直接驱动出图 / 出视频 /
+把 `workflows/` 下的 7 条 ComfyUI 工作流封装成 MCP 工具，让 Cline 直接驱动出图 / 出视频 /
 配音 / 配乐，而无需手写一次性 Python 脚本。
+
+> 🚫 **2026-09-13 变更：`image_edit_firered` 工具已整体移除**（连带 `WORKFLOWS["firered"]` 注册项与
+> `selftest.py` 的 `[3b]` 用例）。该模型在本机 **5 次运行 5 张纯黑图（mean=0.0）、零成功率**，
+> 而 ComfyUI 每次都报 `success` —— 静默失败不可验收。**本项目图生图唯一工具：`image_edit_longcat`**，
+> 不做 A/B 比较。工作流文件 `workflows/image_firered_image_edit1_1.json` 仅作留档，无任何工具指向它。
 
 - 服务器文件：`mcp_server/comfyui_mcp_server.py`
 - MCP 名称：`comfyui-drama`
@@ -15,8 +20,7 @@
 | 工具 | 工作流 | 用途 |
 |------|--------|------|
 | `z_image_turbo_t2i` | `Z-Image-Turbo 文生图.json` | 文生图（场景 / 道具 / UI / 群像） |
-| `image_edit_longcat` | `Image Edit (LongCat Image Edit).json` | 图像编辑 · **角色一致性**（定妆照 → 新场景）· 首选 |
-| `image_edit_firered` | `image_firered_image_edit1_1.json` | 图像编辑 · **角色一致性** · 与 LongCat **互为备选**［⚠️ **本项目已弃用（2026-09-13）**，见下方铁律］（Qwen-Image-Edit 血统；`lightning=True` → 8 步/CFG 1，默认 40 步/CFG 4） |
+| `image_edit_longcat` | `Image Edit (LongCat Image Edit).json` | 图像编辑 · **角色一致性**（定妆照 → 新场景）· **本项目唯一图生图工具** |
 | `video_minimax_h3_i2v` | `video_minimax_h3_i2v.json` ⭐ | 图生视频（含环境音），视频生成首选 |
 | `video_minimax_h3_r2v` | `video_minimax_h3_r2v.json` ⭐ | 参考图生视频 · 角色锁定（≤2 张参考图） |
 | `video_minimax_h3_t2v` | `video_minimax_h3_t2v.json` | 文生视频（UI 动画 / 无角色镜头） |
@@ -83,8 +87,11 @@ python mcp_server/selftest.py
 | `video_minimax_h3_r2v` | `video/h3_r2v_00001_.mp4` | h264 864×480@24fps + AAC 32kHz 立体声 | ≈2.5 min |
 | `video_minimax_h3_t2v` | `video/h3_t2v_00001_.mp4` | h264 864×480@24fps + AAC 32kHz 立体声 | 202 s |
 
-> ℹ️ 第 8 条 **FireRed Image Edit 1.1** 于 **2026-09-12** 加入：`selftest.py` 的 `[3b]` 用例覆盖其参数注入，
-> 并已真实跑通（ComfyUI `/history` 可见 `TextEncodeQwenImageEditPlus` + `qwen_image_vae` 的成功执行）。
+> 🚫 **原第 8 条 FireRed Image Edit 1.1 —— 已移除（2026-09-13）**。它于 2026-09-12 加入时"跑通"
+> 只验证了**参数注入与节点执行**（`TextEncodeQwenImageEditPlus` + `qwen_image_vae`），
+> 但**产物像素从未合格**：累计 5 次运行（40 步/CFG 4、8 步/CFG 1 Lightning、880×1176、
+> 后续 2 次局部编辑）**全部为纯黑图 `mean=0.0`**，工具却一律返回 `ok:true`。
+> ⇒ 结论：**"ComfyUI 报 success" ≠ "产物可用"**，验收必须查像素或体积。工具已删除。
 
 结论：
 - ✅ 参数注入端到端生效（尺寸 / 时长 / megapixels / seed 与产物实测值吻合）
@@ -110,7 +117,7 @@ python mcp_server/selftest.py
 > seed 固定 1101，输出到 `OUTPUT/04_classroom_dusk/frames`。
 > 🔒 **铁律（2026-09-13，美术方定案）：图生图一律用 `image_edit_longcat`，只用这一个工具、不做 A/B 比较。**
 > **换背景 / 改色调 / 转老照片也走它的图生图**，不要退回去用文生图重新抽卡。
-> （`image_edit_firered` 本项目**弃用**：曾有 3/3 纯黑图静默失败，且已定案只用 LongCat。）
+> （🚫 `image_edit_firered` 工具**已于 2026-09-13 从工具列表删除**：5/5 纯黑图、零成功率。）
 
 **② 分镜图 → 视频（I2V）**
 
@@ -134,7 +141,7 @@ python mcp_server/selftest.py
 | TTS `custom_speaker_name` 必须为空 | 该字段是音色 mixing 列表，填自定义名 → `ValueError` | README §13.7 |
 | 同角色固定 `speaker` + `seed` | 跨集音色一致性的唯一手段 | README §13.11 |
 | 角色镜头必须引用定妆照 | 否则每张脸随机变化，白做定妆 | `LESSONS_LEARNED.md` #6 |
-| 🔒 **图生图只用 `image_edit_longcat`** | **不做 A/B 比较**；换背景/改色调/转老照片同样走它的图生图，不用文生图抽卡。`image_edit_firered` **已弃用**（3/3 纯黑图静默失败） | 美术方 2026-09-13 定案 |
+| 🔒 **图生图只用 `image_edit_longcat`** | **不做 A/B 比较**；换背景/改色调/转老照片同样走它的图生图，不用文生图抽卡。🚫 `image_edit_firered` 工具**已于 2026-09-13 从工具列表删除**（5/5 纯黑图、零成功率） | 美术方 2026-09-13 定案 |
 | 参考图需先注册到 ComfyUI input | 工具已自动走 `/upload/image`；中文/空格文件名会自动改 ASCII | — |
 | 输出路径以 `ffprobe` 实测为准 | 不要相信注释里的分辨率 | `LESSONS_LEARNED.md` #10 |
 
@@ -146,7 +153,7 @@ python mcp_server/selftest.py
 |--------|--------|
 | Z-Image-Turbo T2I | `CLIPTextEncode.text`（负面词拼接为 `Do NOT include:`）· `EmptySD3LatentImage.width/height/batch_size` · `KSampler.seed/steps/cfg` · `PreviewImage→SaveImage.filename_prefix` |
 | LongCat Image Edit | `LoadImage.image` · `TextEncodeQwenImageEdit.prompt`（node id 升序：正/负）· `ImageScaleToTotalPixels.megapixels` · `FluxGuidance.guidance` · `KSampler.seed/steps/cfg` |
-| FireRed Image Edit 1.1 | `LoadImage.image` · `TextEncodeQwenImageEditPlus.prompt`（两个：正/负）· `ResizeImageMaskNode["resize_type.megapixels"]` · `KSampler.seed` · steps/cfg 经 `Switch` 选路落到 `PrimitiveInt` / `PrimitiveFloat`（`PrimitiveBoolean` = lightning：True→8 步/CFG 1，False→40 步/CFG 4）· `SaveImage.filename_prefix` |
+| ~~FireRed Image Edit 1.1~~ | 🚫 **工具已移除（2026-09-13）**，注入点记录不再维护（历史：`ResizeImageMaskNode["resize_type.megapixels"]` · steps/cfg 经 `Switch` 落到 `PrimitiveInt` / `PrimitiveFloat`） |
 | Qwen3-TTS | `Qwen3CustomVoice.text/language/speaker/seed/instruct/max_new_tokens`（`custom_speaker_name=""`）· `SaveAudioAdvanced.filename_prefix/format` |
 | ACE-Step 1.5 | `TextEncodeAceStepAudio1.5.tags/lyrics/seed/bpm/keyscale/language/timesignature/cfg_scale/temperature/top_p` · `PrimitiveFloat.value`（时长）· `KSampler.seed/steps/cfg` · `SaveAudioAdvanced.filename_prefix/format` |
 | H3 I2V | `LoadImage.image` · `MiniMaxH3ImageToVideo.prompt` · `PrimitiveFloat.value` · `RandomNoise.noise_seed` · `ResolutionSelector.aspect_ratio/megapixels` · `BasicScheduler.steps` · `SaveVideo.filename_prefix` |
