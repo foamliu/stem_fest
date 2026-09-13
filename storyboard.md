@@ -84,14 +84,16 @@
 >
 > ⚠️ **场景参考图不要用空教室**——空教室会让模型优先渲染空背景，人物反而像贴上去的。用有人的教室，或直接用四人合影当场景图。
 >
-> **合影做法（2026-09-13 定案）**：
-> ① 从各自定妆照**裁出人物**（`OUTPUT/_diag_group_ref_crop.py`）
-> → ② **并排拼进一张宽图**（`OUTPUT/_diag_group_ref_plate.py`，等高、头顶对齐、无缝）
-> → ③ **LongCat 图生图**合并成一张自然合影（`output_dir = OUTPUT/group_ref/longcat`）
-> → ④ 入库到 `ASSETS/CHARACTERS/_group/<slug>_hero_v01.png`
-> （`OUTPUT/_diag_group_ref_finalize.py` 一步做③④）
+> **合影做法（★ 2026-09-14 定案）**：
+> ⛔ **不再用图生图合并** —— `image_edit_longcat` 转过的合影**有些身份失真**。
+> ✅ **只做「裁人 → 程序并排拼版」两步，拼版图本身就是成品**：
+> ① 从各自定妆照**裁出人物** → ② **并排拼进一张宽图**，直接入库
+> `ASSETS/CHARACTERS/_group/<slug>_hero_v01.png`（一条命令：`py -3.10 OUTPUT/_make_group.py`，
+> 组合清单与站位写死在脚本 `COMBOS` 里；项目 `README.md` §4.2 有用法与台账）。
 >
-> ⚠️ **喂给 R2V 一律用不带标签的 `<slug>_hero_v01.png`**；`_labeled.png` 只给人看。
+> ⚠️ **旧的那套 `_labeled.png`（底部人名标签栏）已不需要** —— 拼版不产生文字。
+> ✅ **钟南山定妆照 2026-09-14 已换成写实照片版**（原为插画风，与四小强拼在一张里风格割裂）。
+> ⚠️ 但新图带「新华网 WWW.NEWS.CN」水印，首跑钟南山镜时留意有无泄漏（见 `README.md` §8 P0）。
 >
 > 台账：`OUTPUT/_cast_per_char.txt`（`python OUTPUT/_diag_cast_per_char.py`）
 

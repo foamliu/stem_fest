@@ -154,13 +154,20 @@ megapixels  = 0.4   (16GB VRAM 下勿超 0.6)
 
 多人（>2 人）R2V 放不下 → 必须**先合成一张合影参考图**（存 `CHARACTERS/_group/`），再喂给 R2V。
 
-⚠️ **合成方法（2026-09-13 更正）**：**不要**用 `image_edit_longcat` 把多张脸拼图合成 —— 实测**身份全丢**
-（四小强 v01：三女一男、四人一个都认不出）⇒ 改为「**每人单独出图 → 程序抠人 → 贴到同一张场景底图**」
-（脚本 `OUTPUT/_diag_group_compose.py`；身份由单人配方保证、人数与站位由程序保证）。
-完整做法与**还缺 20 张合影**的清单见 `README.md` §8 P0（**2026-09-13 起 `CHARACTERS/00_INDEX.md` 已并入本文件**）。
-★ **2026-09-13 新增规则**：**多人场景内的镜，参考图必须让人物齐全** —— 两人对白镜用双方合影；
+★ **合影做法（2026-09-14 定案）**：**「裁人 → 程序并排拼版」两步，拼版图本身就是成品**。
+
+```powershell
+py -3.10 OUTPUT/_make_group.py --list     # 列 27 个组合与产物路径
+py -3.10 OUTPUT/_make_group.py --all      # 全部生成（单人裁图在 OUTPUT/group_ref/crops/）
+```
+
+⛔ **不要再用 `image_edit_longcat` 合并合影** —— 实测**有些转后身份失真**。
+⚠️ **钟南山定妆照 2026-09-14 已换成写实照片版**（原为插画风，与四小强拼在一张里风格割裂）；
+但新图带「新华网 WWW.NEWS.CN」水印，首跑钟南山镜时留意有无泄漏（见 `README.md` §8 P0）。
+📖 **组合 ↔ 镜号台账（唯一权威）与站位约定 → `README.md` §4.2 / §9**。
+★ **多人场景内的镜，参考图必须让人物齐全** —— 两人对白镜用双方合影；
 **多人场景里的「单人说话镜」用该场景全体合影**（否则旁人在画面里凭空消失）；仅面部特写例外。
-⇒ 多人镜 **88/126**、去重 **28 种组合**（详见 `README.md` §4.2 与 §8 P0）。
+⇒ 多人镜 **88/126**、去重 **28 种组合**。
 
 > ⚠️ **ComfyUI 上传不覆盖同名文件**（实测 2026-09-12）：若 `input/` 里已存在同名文件，
 > `comfyui_upload_image` 不会覆盖，而是存成 `名字 (1).png`、`名字 (2).png`…
@@ -222,50 +229,19 @@ ASSETS/
 
 | 文件 | 被谁引用 | 状态 |
 |------|----------|------|
-| `ASSETS/配乐提示词规格.md` | `ace_step_t2audio` 工具说明（"Caption + Lyrics 双管齐下"法则） | 尚未创建 |
-| `CHARACTERS/_group/liu_sicheng_zhang_shuyang_hero_v01.png` | 刘思成 + 张书扬 同框镜（16/19/121/124） | ✅ **已到位**（2026-09-13 用户提供；已抹姓名标签 + 裁水印） |
-| `CHARACTERS/_group/four_students_hero_v02.png` | 四小强同框镜（9/10/41/76/83/106/111/121/126）｜v01 **❌ 报废**（混脸） | ✅ **已到位**（2026-09-13 用户提供宽幅合影；只裁不修 → 2848×1062） |
-| `CHARACTERS/_group/four_students_yuan_longping_hero_v01.png` | 四小强 + 袁隆平 同框镜（47/54/55/56/58/65/67/74） | ✅ **已到位**（2026-09-13 用户提供 5 人宽幅合影；3560×1221；**零清理，像素未动**） |
-| `CHARACTERS/_group/four_students_huang_jiguang_hero_v01.png` | 四小强 + 黄继光 同框镜（24/27/29/33/40/43/45/46） | ✅ **已到位**（同上；3560×1221；**零清理**） |
-| `CHARACTERS/_group/four_students_zhong_nanshan_hero_v01.png` | 四小强 + 钟南山 同框镜（81/82/84/89/92/94/105） | ✅ **已到位**（同上；3560×1221；**零清理**） |
-| `CHARACTERS/_group/girl_mother_hero_v01.png` | 小女孩 + 妈妈（1/2） | ✅ **已到位** |
-| **以下 20 张：2026-09-13 由「裁→拼→LongCat 图生图」管线新产**（见 `README.md` §8 P0） | | |
-| `liu_siqi_zhang_shuyang_hero_v01.png` | 刘思齐 + 张书扬（15） | ✅ 新产 |
-| `zhang_shuyang_zhong_nanshan_hero_v01.png` | 张书扬 + 钟南山（88,89,97,98,99,100,101） | ✅ 新产 |
-| `liu_siqi_zhong_nanshan_hero_v01.png` | 刘思齐 + 钟南山（87,95,102,103,104,105） | ✅ 新产 |
-| `zhang_shuyang_xu_changjing_hero_v01.png` | 张书扬 + 徐畅景（13,14,23,24,33） | ✅ 新产 |
-| `young_soldier_soldiers_huang_jiguang_hero_v01.png` | 小战士 + 战士群演 + 黄继光（25,38,41） | ✅ 新产 |
-| `zhang_shuyang_huang_jiguang_hero_v01.png` | 张书扬 + 黄继光（27,32,111） | ✅ 新产 |
-| `zhang_shuyang_yuan_longping_hero_v01.png` | 张书扬 + 袁隆平（59,72,73） | ✅ 新产 |
-| `liu_siqi_yuan_longping_hero_v01.png` | 刘思齐 + 袁隆平（61,68,74） | ✅ 新产 |
-| `liu_sicheng_yuan_longping_hero_v01.png` | 刘思成 + 袁隆平（63,64,65） | ✅ 新产 |
-| `liu_sicheng_young_soldier_soldiers_hero_v01.png` | 刘思成 + 小战士 + 战士群演（36,37） | ✅ 新产 |
-| `liu_sicheng_liu_siqi_hero_v01.png` | 刘思成 + 刘思齐（22,80） | ✅ 新产 |
-| `liu_sicheng_huang_jiguang_hero_v01.png` | 刘思成 + 黄继光（28,30） | ✅ 新产 |
-| `xu_changjing_yuan_longping_hero_v01.png` | 徐畅景 + 袁隆平（70,71） | ✅ 新产 |
-| `four_students_soldiers_hero_v01.png` | 四小强 + 战士群演（21） | ✅ 新产 |
-| `liu_siqi_zhang_shuyang_xu_changjing_hero_v01.png` | 刘思齐 + 张书扬 + 徐畅景（7） | ✅ 新产 |
-| `xu_changjing_soldiers_huang_jiguang_hero_v01.png` | 徐畅景 + 战士群演 + 黄继光（34） | ✅ 新产 |
-| `soldiers_huang_jiguang_hero_v01.png` | 战士群演 + 黄继光（44） | ✅ 新产 |
-| `liu_siqi_huang_jiguang_hero_v01.png` | 刘思齐 + 黄继光（46） | ✅ 新产 |
-| `xu_changjing_zhong_nanshan_hero_v01.png` | 徐畅景 + 钟南山（90） | ⏳ **待补**（`plate/` 有拼版，重跑 LongCat 即可） |
-| `liu_sicheng_zhong_nanshan_hero_v01.png` | 刘思成 + 钟南山（92） | ⏳ **待补**（同上） |
-| `four_students_soldiers_hero_v01.png` | 四小强 + 战士群演（21） | ✅ 2026-09-13 新产（LongCat seed 7701） |
-| `soldiers_huang_jiguang_hero_v01.png` | 战士群演 + 黄继光（44） | ✅ 2026-09-13 新产（seed 7702） |
-| `liu_siqi_huang_jiguang_hero_v01.png` | 刘思齐 + 黄继光（46） | ✅ 2026-09-13 新产（seed 7703） |
+| `ASSETS/配乐提示词规格.md` | `ace_step_t2audio` 工具说明（"Caption + Lyrics 双管齐下"法则） | 尚未创建（**L3 配方已另存于 `mcp_server/comfyui_tools.md` §6.5**，可降级） |
 
-> ★ 每张新合影都有两个版本：`<slug>_hero_v01.png`（**喂 R2V 用这个**，无文字）
-> 与 `<slug>_hero_v01_labeled.png`（底部带人名标签栏，**只给人看**）。
-> ⚠️ 别把 `_labeled` 喂给 R2V —— 参考图里的文字有被 H3 画进画面的风险。
-> ⚠️ **图片文件全部被 `.gitignore` 忽略** ⇒ 这 20 张只在本地，不入库（与既有合影一致）。
+**合影参考图（`CHARACTERS/_group/`）—— 2026-09-14 已 20/20 齐**
 
-> ★ **入库策略变更（2026-09-13）**：合影类参考图**默认零清理**（不改任何像素），
-> 不再默认「抹标签 / 裁水印」——那些是参考图，不是成片画面；先跑 R2V 看有无泄漏，有再清。
->
-> ⚠️ **还缺的合影 / 配角清单（含覆盖镜号、站位提示、出图硬要求）见 `README.md` §8 P0 #19** ——
-> 拆出去的 `_group/00_要图清单.md` 已删除，内容已并入那里。
-> ⛔ 2026-09-13：原「徐畅景 + 刘思齐」合影（`xu_changjing_liu_siqi_hero_v01.png`）**文件留档但当前无镜引用**
-> —— 现在需要的是三人组「刘思齐 + 张书扬 + 徐畅景」（镜 7），见 `README.md` §8。
+| 分组 | 状态 |
+|---|---|
+| 用户直接提供的 5 张宽幅合影（`four_students` v02 / `+huang_jiguang` / `+yuan_longping` / `girl_mother` / `liu_sicheng_zhang_shuyang`） | ✅ **零清理，像素未动** |
+| 其余 **26 组合 + 11 单人图**：由 `OUTPUT/_make_group.py` **程序拼版**生成 | ✅ 全部生成；钟南山换成写实照片后 4 张二人合影已重拼 |
+| `four_students_zhong_nanshan`（专用脚本） | ✅ 2026-09-14 由 `OUTPUT/_rebuild_4zn.py` 重拼（写实四人合影 + 写实钟南山）；旧用户版含插画风钟南山 + 豆包水印，已弃用 |
+
+> ⚠️ **图片文件被 `.gitignore` 忽略** ⇒ `_group/` 的图只在本地。**现 37 个文件**（26 组合 + 11 单人图），
+> 已清掉 LongCat 时代的 18 个 `_labeled.png` 与无引用的旧图。
+> ⚠️ **组合 ↔ 镜号台账（唯一权威）见 `README.md` §9**；站位与 slug 清单见 `_make_group.py` 的 `COMBOS`。
 
 ---
 

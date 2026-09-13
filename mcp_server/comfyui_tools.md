@@ -147,6 +147,42 @@ python mcp_server/selftest.py
 
 ---
 
+## 6.5 ★ `ace_step_t2audio` 环境声 / 群杂（L2 / L3）照抄配方
+
+> 用途见项目 `README.md` §4.4（音频三层分工）：**H3 只做 L1 台词**，
+> L2 环境声与 L3 群杂人声一律用本工具，**不要交给 H3**（H3 只会产出糊状人声 / ≈ −50 dB 的静默）。
+
+**实测指标（2026-09-13，`OUTPUT/bgm/`，脚本 `OUTPUT/_diag_audio_report.py`）**
+
+| 文件 | 时长 | 整体 RMS | peak | 段 RMS 变异 | 平均 ZCR | 判断 |
+|---|:--:|---|---|---|---|---|
+| `crowd_test_classroom_00001.mp3`（L3 群杂） | 20.0s | 0.0389 | 0.855 | 4.97 | 0.0399 | 宽频噪音状 ✅ |
+| `sfx_classroom_night_00001.mp3` | 25.0s | 0.0455 | 0.479 | 3.46 | 0.0302 | 宽频噪音状 ✅ |
+| `sfx_rice_field_cicada_00001.mp3` | 25.0s | 0.1076 | 0.805 | 1.82 | 0.0403 | 宽频噪音状 ✅ |
+| `sfx_trench_wind_00001.mp3` | 25.0s | 0.0270 | 0.751 | 8.50 | 0.0348 | 宽频噪音状 ✅ |
+| `sfx_train_dining_00001.mp3` | 25.0s | 0.0036 | 0.058 | 5.33 | 0.0241 | ⚠️ RMS 偏低，音量需后期抬 |
+
+> 判定口径：**ZCR 高 = 宽频噪音**（风声/群杂/蝉鸣等真实环境声该有的样子）；
+> **ZCR 极低 = 单一音调**（可能被生成成音乐而非氛围）。
+> **段 RMS 变异大 = 有自然呼吸起伏**；极小 = 像持续嗡鸣/循环旋钮。
+
+**L3 群杂配方（照抄）**
+
+```
+tags     = ambient soundscape, classroom background walla, many indistinct young voices
+           murmuring at once, no music, no melody, no singing, no instruments,
+           unreadable chatter, room tone, soft and distant, documentary field recording,
+           lo-fi, 60 BPM
+lyrics   = 用 [Ambience - ...] 段落标记写"结构"，并反复强调
+           no music, no melody, no singing, no intelligible words
+duration = 要铺多长就出多长（20s 成本约 30s 机时）
+```
+
+> ⚠️ 环境声（L2）同理，把 `tags` 换成对应声源描述即可；
+> **`lyrics` 里务必写死 `no music, no melody, no singing`**，否则 ACE-Step 会倾向产出旋律。
+
+---
+
 ## 7. 参数注入对照（维护者参考）
 
 | 工作流 | 注入点 |
