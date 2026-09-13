@@ -190,6 +190,7 @@ ASSETS/
 |------|----------|------|
 | `ASSETS/配乐提示词规格.md` | `ace_step_t2audio` 工具说明（"Caption + Lyrics 双管齐下"法则） | 尚未创建 |
 | `CHARACTERS/_group/liu_sicheng_zhang_shuyang_hero_v01.png` | 刘思成 + 张书扬 同框镜（16/20/131） | ✅ **已到位**（2026-09-13 用户提供；已抹姓名标签 + 裁水印） |
+| `CHARACTERS/_group/xu_changjing_liu_siqi_hero_v01.png` | 徐畅景 + 刘思齐 同框镜（19） | ✅ **已到位**（2026-09-13 用户提供；已抹两处姓名标签；两格拼版） |
 | `CHARACTERS/_group/four_students_hero_v02.png` | 四小强同框镜（9/10/46/81/89/113/118/134/139）｜v01 已产出但 **❌ 报废**（混脸） | ⏸ **待跑**（脚本就绪；需 ComfyUI 在线 + 4 张单人图） |
 
 ---
