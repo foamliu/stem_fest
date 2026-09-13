@@ -99,13 +99,16 @@ ASSETS/PROPS/01_paper_plane/paper_plane_hero_v01.png
 
 | # | 角色 | 文件 | 实测规格 | 状态 |
 |:-:|------|------|----------|:----:|
-| 01 | 刘思齐 | `CHARACTERS/01_liu_siqi/liu_siqi_hero_v01.png` | PNG 2848×1600 RGB（16:9 三视图拼版） | ✅ 已就位 |
-| 02 | 刘思成 | `CHARACTERS/02_liu_sicheng/liu_sicheng_hero_v01.png` | PNG 2048×1152 RGB（16:9 三视图拼版，明亮中性底） | ✅ 已就位 |
-| 03 | 徐畅景 | `CHARACTERS/03_xu_changjing/xu_changjing_hero_v01.png` | PNG 2848×1600 RGB（16:9 三视图拼版） | ✅ 已就位 |
-| 04 | 张书扬 | `CHARACTERS/04_zhang_shuyang/zhang_shuyang_hero_v01.png` | PNG 2048×1152 RGB（16:9，明亮中性底） | ✅ 已就位 |
-| 05 | 黄继光 | `CHARACTERS/05_huang_jiguang/huang_jiguang_hero_v01.png`（另有 `closeup_v01` 近景） | PNG 2048×1152 RGB（中景 + 近景，土黄暖调） | ✅ 已就位 ×2 |
-| 06 | 袁隆平 | `CHARACTERS/06_yuan_longping/yuan_longping_hero_v01.png`（另有 v02 备选） | PNG 2048×1152 RGB（16:9 三视图拼版） | ✅ 已就位 ×2 |
-| 07 | 钟南山 | `CHARACTERS/07_zhong_nanshan/zhong_nanshan_hero_v01.png` | PNG 2048×1152 RGB（16:9 三视图拼版，中性灰底） | ✅ 已就位 |
+| 01 | 刘思齐 | `CHARACTERS/01_liu_siqi/liu_siqi_hero_v01.png` | PNG 2048×1152 RGB（横版） | ✅ 已就位 |
+| 02 | 刘思成 | `CHARACTERS/02_liu_sicheng/liu_sicheng_hero_v01.png` | PNG 2304×1728 RGB（横版） | ✅ 已就位 |
+| 03 | 徐畅景 | `CHARACTERS/03_xu_changjing/xu_changjing_hero_v01.png` | PNG 1536×2048 RGB（**竖版·头肩特写**） | ✅ 已就位 |
+| 04 | 张书扬 | `CHARACTERS/04_zhang_shuyang/zhang_shuyang_hero_v01.png` | PNG 1728×2304 RGB（**竖版**） | ✅ 已就位 |
+| 05 | 黄继光 | **`CHARACTERS/05_huang_jiguang/huang_jiguang_hero_v02.png`（主参考·已去水印）** ＋ `huang_jiguang_hero_v01.png`（带水印·备查）＋ `huang_jiguang_closeup_v01.png`（近景） | PNG 1664×2249（v02）/ 1664×2368（v01）RGB | ✅ 已就位 ×3 |
+| 06 | 袁隆平 | `CHARACTERS/06_yuan_longping/yuan_longping_hero_v01.png`（主）＋ `yuan_longping_hero_v02.png`（备选） | PNG 2848×1600（v01）/ 2048×1152（v02）RGB | ✅ 已就位 ×2 |
+| 07 | 钟南山 | `CHARACTERS/07_zhong_nanshan/zhong_nanshan_hero_v01.png` | PNG 880×1184 RGB（**小图**） | ✅ 已就位 |
+
+> 🔎 **2026-09-13 用 PIL 实测复核**：上表尺寸此前多行有误 —— **03 / 04 / 05 / 07 实为竖版**（头肩特写 / 半身），
+> 并非"横版 16:9 三视图"。**竖版定妆照可直接当 R2V 的 `<Picture 1>`**（R2V 不要求参考图比例），不要硬裁 16:9。
 
 > ⚠️ **三视图拼版的实际风险**：一张图里含正/侧/背三个角度，`image_edit_longcat` 有可能把三个角度
 > 一起画进新镜头。若出现这种情况，把**正面那一格单独裁出来**另存为 `liu_siqi_front_v01.png`
@@ -137,8 +140,12 @@ ref_image_2 = ASSETS/CHARACTERS/05_huang_jiguang/huang_jiguang_hero_v01.png → 
 megapixels  = 0.4   (16GB VRAM 下勿超 0.6)
 ```
 
-四人同框（>2 人）R2V 放不下 → 先用 `image_edit_longcat` 逐人拼一张**合影参考图**
-（存 `CHARACTERS/_group/`），再喂给 R2V。
+多人（>2 人）R2V 放不下 → 必须**先合成一张合影参考图**（存 `CHARACTERS/_group/`），再喂给 R2V。
+
+⚠️ **合成方法（2026-09-13 更正）**：**不要**用 `image_edit_longcat` 把多张脸拼图合成 —— 实测**身份全丢**
+（四小强 v01：三女一男、四人一个都认不出）⇒ 改为「**每人单独出图 → 程序抠人 → 贴到同一张场景底图**」
+（脚本 `OUTPUT/_diag_group_compose.py`；身份由单人配方保证、人数与站位由程序保证）。
+完整做法、执行状态与 5 张主力合影清单见 `CHARACTERS/00_INDEX.md` §2.5。
 
 > ⚠️ **ComfyUI 上传不覆盖同名文件**（实测 2026-09-12）：若 `input/` 里已存在同名文件，
 > `comfyui_upload_image` 不会覆盖，而是存成 `名字 (1).png`、`名字 (2).png`…
@@ -161,6 +168,7 @@ ASSETS/
 │   ├── 05_huang_jiguang/          # 黄继光
 │   ├── 06_yuan_longping/          # 袁隆平
 │   ├── 07_zhong_nanshan/          # 钟南山
+│   ├── _group/                    # 合影参考图（≥2 人镜的 R2V 前置输入）
 │   └── _extras/                   # 小战士 / 小女孩 / 妈妈 / 战士群演
 ├── SCENES/  (00_INDEX.md + 8 个场景)
 ├── PROPS/   (00_INDEX.md + 12 个道具)
@@ -181,7 +189,7 @@ ASSETS/
 | 文件 | 被谁引用 | 状态 |
 |------|----------|------|
 | `ASSETS/配乐提示词规格.md` | `ace_step_t2audio` 工具说明（"Caption + Lyrics 双管齐下"法则） | 尚未创建 |
-| `CHARACTERS/_group/four_students_hero_v01.png` | 四人同框镜头（9/10/22/53/79/113/118/135 等） | 尚未创建 |
+| `CHARACTERS/_group/four_students_hero_v02.png` | 四小强同框镜（9/10/46/81/89/113/118/134/139）｜v01 已产出但 **❌ 报废**（混脸） | ⏸ **待跑**（脚本就绪；需 ComfyUI 在线 + 4 张单人图） |
 
 ---
 

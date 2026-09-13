@@ -16,7 +16,7 @@
 |------|--------|------|
 | `z_image_turbo_t2i` | `Z-Image-Turbo 文生图.json` | 文生图（场景 / 道具 / UI / 群像） |
 | `image_edit_longcat` | `Image Edit (LongCat Image Edit).json` | 图像编辑 · **角色一致性**（定妆照 → 新场景）· 首选 |
-| `image_edit_firered` | `image_firered_image_edit1_1.json` | 图像编辑 · **角色一致性** · 与 LongCat **互为备选**（Qwen-Image-Edit 血统；`lightning=True` → 8 步/CFG 1，默认 40 步/CFG 4） |
+| `image_edit_firered` | `image_firered_image_edit1_1.json` | 图像编辑 · **角色一致性** · 与 LongCat **互为备选**［⚠️ **本项目已弃用（2026-09-13）**，见下方铁律］（Qwen-Image-Edit 血统；`lightning=True` → 8 步/CFG 1，默认 40 步/CFG 4） |
 | `video_minimax_h3_i2v` | `video_minimax_h3_i2v.json` ⭐ | 图生视频（含环境音），视频生成首选 |
 | `video_minimax_h3_r2v` | `video_minimax_h3_r2v.json` ⭐ | 参考图生视频 · 角色锁定（≤2 张参考图） |
 | `video_minimax_h3_t2v` | `video_minimax_h3_t2v.json` | 文生视频（UI 动画 / 无角色镜头） |
