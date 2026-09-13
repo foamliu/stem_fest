@@ -192,6 +192,13 @@ ASSETS/
 | `CHARACTERS/_group/liu_sicheng_zhang_shuyang_hero_v01.png` | 刘思成 + 张书扬 同框镜（16/20/131） | ✅ **已到位**（2026-09-13 用户提供；已抹姓名标签 + 裁水印） |
 | `CHARACTERS/_group/xu_changjing_liu_siqi_hero_v01.png` | 徐畅景 + 刘思齐 同框镜（19） | ✅ **已到位**（2026-09-13 用户提供；已抹两处姓名标签；两格拼版） |
 | `CHARACTERS/_group/four_students_hero_v02.png` | 四小强同框镜（9/10/46/81/89/113/118/134/139）｜v01 **❌ 报废**（混脸） | ✅ **已到位**（2026-09-13 用户提供宽幅合影；只裁不修 → 2848×1062） |
+| `CHARACTERS/_group/four_students_yuan_longping_hero_v01.png` | 四小强 + 袁隆平 同框镜（52/59/60/63/79） | ✅ **已到位**（2026-09-13 用户提供 5 人宽幅合影；3560×1221；**零清理，像素未动**） |
+| `CHARACTERS/_group/four_students_huang_jiguang_hero_v01.png` | 四小强 + 黄继光 同框镜（27/45/48/51） | ✅ **已到位**（同上；3560×1221；**零清理**） |
+| `CHARACTERS/_group/four_students_zhong_nanshan_hero_v01.png` | 四小强 + 钟南山 同框镜（87） | ✅ **已到位**（同上；3560×1221；**零清理**） |
+
+> ★ **入库策略变更（2026-09-13）**：合影类参考图**默认零清理**（不改任何像素），
+> 不再默认「抹标签 / 裁水印」——那些是参考图，不是成片画面；先跑 R2V 看有无泄漏，有再清。
+> 详见 `CHARACTERS/00_INDEX.md §2.5` 教训 4。
 
 ---
 
