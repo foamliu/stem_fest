@@ -224,6 +224,32 @@ ASSETS/
 | `CHARACTERS/_group/four_students_huang_jiguang_hero_v01.png` | 四小强 + 黄继光 同框镜（26/29/31/35/42/45/47/48） | ✅ **已到位**（同上；3560×1221；**零清理**） |
 | `CHARACTERS/_group/four_students_zhong_nanshan_hero_v01.png` | 四小强 + 钟南山 同框镜（83/84/86/91/94/96/107） | ✅ **已到位**（同上；3560×1221；**零清理**） |
 | `CHARACTERS/_group/girl_mother_hero_v01.png` | 小女孩 + 妈妈（1/2） | ✅ **已到位** |
+| **以下 20 张：2026-09-13 由「裁→拼→LongCat 图生图」管线新产**（见 `README.md` §8 P0） | | |
+| `liu_siqi_zhang_shuyang_hero_v01.png` | 刘思齐 + 张书扬（15） | ✅ 新产 |
+| `zhang_shuyang_zhong_nanshan_hero_v01.png` | 张书扬 + 钟南山（88,89,97,98,99,100,101） | ✅ 新产 |
+| `liu_siqi_zhong_nanshan_hero_v01.png` | 刘思齐 + 钟南山（87,95,102,103,104,105） | ✅ 新产 |
+| `zhang_shuyang_xu_changjing_hero_v01.png` | 张书扬 + 徐畅景（13,14,23,24,33） | ✅ 新产 |
+| `young_soldier_soldiers_huang_jiguang_hero_v01.png` | 小战士 + 战士群演 + 黄继光（25,38,41） | ✅ 新产 |
+| `zhang_shuyang_huang_jiguang_hero_v01.png` | 张书扬 + 黄继光（27,32,111） | ✅ 新产 |
+| `zhang_shuyang_yuan_longping_hero_v01.png` | 张书扬 + 袁隆平（59,72,73） | ✅ 新产 |
+| `liu_siqi_yuan_longping_hero_v01.png` | 刘思齐 + 袁隆平（61,68,74） | ✅ 新产 |
+| `liu_sicheng_yuan_longping_hero_v01.png` | 刘思成 + 袁隆平（63,64,65） | ✅ 新产 |
+| `liu_sicheng_young_soldier_soldiers_hero_v01.png` | 刘思成 + 小战士 + 战士群演（36,37） | ✅ 新产 |
+| `liu_sicheng_liu_siqi_hero_v01.png` | 刘思成 + 刘思齐（22,80） | ✅ 新产 |
+| `liu_sicheng_huang_jiguang_hero_v01.png` | 刘思成 + 黄继光（28,30） | ✅ 新产 |
+| `xu_changjing_yuan_longping_hero_v01.png` | 徐畅景 + 袁隆平（70,71） | ✅ 新产 |
+| `four_students_soldiers_hero_v01.png` | 四小强 + 战士群演（21） | ✅ 新产 |
+| `liu_siqi_zhang_shuyang_xu_changjing_hero_v01.png` | 刘思齐 + 张书扬 + 徐畅景（7） | ✅ 新产 |
+| `xu_changjing_soldiers_huang_jiguang_hero_v01.png` | 徐畅景 + 战士群演 + 黄继光（34） | ✅ 新产 |
+| `soldiers_huang_jiguang_hero_v01.png` | 战士群演 + 黄继光（44） | ✅ 新产 |
+| `liu_siqi_huang_jiguang_hero_v01.png` | 刘思齐 + 黄继光（46） | ✅ 新产 |
+| `xu_changjing_zhong_nanshan_hero_v01.png` | 徐畅景 + 钟南山（90） | ✅ 新产 |
+| `liu_sicheng_zhong_nanshan_hero_v01.png` | 刘思成 + 钟南山（92） | ✅ 新产 |
+
+> ★ 每张新合影都有两个版本：`<slug>_hero_v01.png`（**喂 R2V 用这个**，无文字）
+> 与 `<slug>_hero_v01_labeled.png`（底部带人名标签栏，**只给人看**）。
+> ⚠️ 别把 `_labeled` 喂给 R2V —— 参考图里的文字有被 H3 画进画面的风险。
+> ⚠️ **图片文件全部被 `.gitignore` 忽略** ⇒ 这 20 张只在本地，不入库（与既有合影一致）。
 
 > ★ **入库策略变更（2026-09-13）**：合影类参考图**默认零清理**（不改任何像素），
 > 不再默认「抹标签 / 裁水印」——那些是参考图，不是成片画面；先跑 R2V 看有无泄漏，有再清。
