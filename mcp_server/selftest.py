@@ -46,6 +46,10 @@ srv._queue = _fake_queue
 srv._wait = lambda pid, timeout: {"outputs": {}}                    # noqa: E731
 srv._save_outputs = lambda entry, out_dir: []                      # noqa: E731
 srv._upload_image = lambda p, target_name=None: "ref_test.png"     # noqa: E731
+srv._upload_audio = lambda p, target_name=None: "audio_test.wav"   # noqa: E731
+srv._extract_audio = lambda p: p                                   # noqa: E731
+# ASR 用例需要一个存在的输入文件（真实路径检查在工具内）
+_ASR_FIXTURE = SERVER.parent.parent / "OUTPUT" / "_selftest_audio_fixture.wav"
 
 
 def call(fn, **kwargs) -> tuple[dict, dict]:
@@ -69,10 +73,12 @@ def main() -> int:
     expected = [
         "ace_step_t2audio", "comfyui_get_result", "comfyui_status",
         "comfyui_upload_image", "image_edit_longcat",
-        "qwen3_tts", "video_minimax_h3_i2v", "video_minimax_h3_r2v",
+        "qwen3_asr", "qwen3_tts",
+        "video_minimax_h3_i2v", "video_minimax_h3_r2v",
         "video_minimax_h3_t2v", "z_image_turbo_t2i",
     ]
-    _check("工具数量 = 10（FireRed 已于 2026-09-13 移除）", len(tools) == 10,
+    _check("工具数量 = 11（FireRed 已于 2026-09-13 移除；qwen3_asr 已加入）",
+           len(tools) == 11,
            f"实际 {len(tools)}: {tools}")
     for name in expected:
         _check(f"已注册 {name}", name in tools)
@@ -127,6 +133,33 @@ def main() -> int:
            sav["format"] == "flac" and sav["filename_prefix"].startswith("tts/"))
     bad = json.loads(srv.qwen3_tts(text="x", speaker="不存在的音色"))
     _check("非法 speaker 被拒绝", bad.get("ok") is False, str(bad))
+
+    # 5. ACE-Step
+    print("\n[5] ace_step_t2audio")
+
+    # 4b. Qwen3-ASR（配音核对）
+    print("\n[4b] qwen3_asr")
+    _ASR_FIXTURE.parent.mkdir(parents=True, exist_ok=True)
+    _ASR_FIXTURE.write_bytes(b"RIFF....WAVEfmt ")   # 占位内容，仅用于存在性检查
+    try:
+        res, wf = call(srv.qwen3_asr, audio=str(_ASR_FIXTURE),
+                       language="Chinese", context="如愿·看见",
+                       return_timestamps=False)
+        _check("提交成功", res.get("ok") is True, str(res))
+        tr = inputs_of(wf, "Qwen3ASRTranscribe")[0]
+        _check("language/context 注入 Qwen3ASRTranscribe",
+               tr["language"] == "Chinese" and tr["context"] == "如愿·看见"
+               and tr["return_timestamps"] is False)
+        _check("LoadAudio 注入音频名",
+               inputs_of(wf, "LoadAudio")[0]["audio"] == "audio_test.wav")
+        _check("SaveText 前缀 + txt 格式",
+               inputs_of(wf, "SaveText")[0]["format"] == "txt"
+               and inputs_of(wf, "SaveText")[0]["filename_prefix"].startswith("asr/"))
+    finally:
+        try:
+            _ASR_FIXTURE.unlink()
+        except Exception:
+            pass
 
     # 5. ACE-Step
     print("\n[5] ace_step_t2audio")

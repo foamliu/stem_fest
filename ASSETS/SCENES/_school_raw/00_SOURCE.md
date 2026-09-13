@@ -103,7 +103,7 @@
 
 **你只要确认或改选编号即可**，例如："校门用 05，全景用 06"，我会：
 1. 拷进对应目录并改名为规范名（`school_gate_medium_v01.jpg` / `campus_wide_v01.jpg`）
-2. 在 `SCENES/00_INDEX.md` 里登记
+2. 在 `ASSETS/README.md` §7「素材关键规格」里登记
 3. 上传到 ComfyUI 并发一张测试图验证可用
 
 ## 4. 注意

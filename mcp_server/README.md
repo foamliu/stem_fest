@@ -12,11 +12,10 @@
 mcp_server/
 ├── comfyui_mcp_server.py     # ① 短剧生产管线（图像/视频/语音/音乐）
 ├── selftest.py               #    离线自检（无需 ComfyUI）
-├── comfyui_tools.md          #    ① 详解：参数、实测、约束、注入对照
+├── comfyui_tools.md          #    ① 详解：工具清单、参数注入、实测耗时、已知约束
 ├── web_search_mcp_server.py  # ② 联网搜索（免密钥）
 ├── web_search_selftest.py    #    离线自检（无需联网）
-├── web_search_tools.md       #    ② 详解：引擎、参数、用法
-└── README.md                 # 本文件（套件总览）
+└── README.md                 # 本文件（套件总览；② 的用法在本文件 §3）
 ```
 
 ---
@@ -157,14 +156,27 @@ OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
 
 | 工具 | 用途 |
 |------|------|
-| `web_search` | 通用网页搜索（多引擎轮换，中英文均可） |
-| `search_news` | 新闻搜索（含日期与来源） |
-| `search_images` | 图片搜索（返回原图/缩略图直链） |
-| `wiki_lookup` | 维基百科检索 + 首段摘要（稳定可靠） |
-| `fetch_page` | 抓取网页正文（markdown，支持 offset 续读） |
-| `search_status` | 依赖版本 / 可用引擎 / 默认参数 / 实时探测 |
+| `web_search(query, max_results=8, region="cn-zh", timelimit="", safesearch="moderate", page=1, backend="")` | 通用网页搜索（`ddgs` 多引擎并发轮换 + 去重，失败自动按 `duckduckgo → brave → bing → google → mojeek → yahoo → startpage` 回退，返回里告知 `backend_used`） |
+| `search_news` | 新闻搜索（额外带 `date` / `source`） |
+| `search_images` | 图片搜索（返回原图/缩略图直链 + 尺寸）—— 为分镜找视觉参考，**注意版权** |
+| `wiki_lookup(query, lang="zh", max_results=5, extract_chars=1200)` | 维基百科检索 + 首段摘要（MediaWiki `generator=search + prop=extracts`，需可靠来源时用它） |
+| `fetch_page(url, max_chars=8000, offset=0, fmt="text_markdown")` | 抓网页正文；主路径 `ddgs.extract`，回退 `urllib+bs4`，再回退正则；用 `next_offset` 续读长文 |
+| `search_status(live_probe=False)` | 返回 `ddgs` 版本 / 可用引擎 / 默认参数 / 可选依赖；**首次使用前先跑一次** |
 
-→ 详见 **[web_search_tools.md](web_search_tools.md)**
+**后端选型（为什么用 `ddgs`）**
+
+| 方案 | 免密钥 | 实测结论 |
+|------|:------:|----------|
+| 直抓 `html./lite.duckduckgo.com` | ✅ | ❌ 约 15 次请求后返回"选鸭子"风控页，不可用 |
+| 公共 SearXNG `?format=json` | ✅ | ❌ 多为 429 / 返回 HTML / TLS 失败 |
+| DuckDuckGo Instant Answer API | ✅ | ✅ 可用但只有词条摘要，不是通用搜索 |
+| **`ddgs` 库（本方案）** | ✅ | ✅ **多引擎并发轮换 + cookie/指纹处理**，单引擎失效自动降级 |
+| Tavily / Brave / Serper | ❌ 需 key | 免费额度小，留给有 key 者自选 |
+
+**环境变量**：`WEB_SEARCH_DEFAULT_REGION`（默认 `cn-zh`）、`WEB_SEARCH_DEFAULT_BACKEND`（默认 `auto`）、`WEB_SEARCH_MAX_RESULTS`（默认 `8`）。
+
+**已知限制**：依赖第三方引擎页面结构（改版可能短暂失效，已内置回退）；有缓存延迟；高频调用可能被限流；
+`fetch_page` 仅用于读取公开页面；`web_search` 只给摘要（约 200 字），要全文请配 `fetch_page`。
 
 ---
 
@@ -180,30 +192,16 @@ CI 或改代码后可随时跑。当前状态：**全部通过**。
 
 ---
 
-## 5. 实测验证速览
+## 5. 实测验证速览（2026-09-11，ComfyUI 0.33.0 / RTX 4090 Laptop 16GB）
 
-### comfyui-drama（2026-09-11，ComfyUI 0.33.0 / RTX 4090 Laptop 16GB）
-
-2026-09-11 的 7 条工作流全部真实跑通并落盘（产物在 `OUTPUT/mcp_smoke/`）：
-
-| 工具 | 实测产物规格 |
-|------|--------------|
-| `z_image_turbo_t2i` | PNG 768×768 RGB（与请求尺寸一致） |
-| `image_edit_longcat` | PNG 1360×768 RGB（定妆照竖构图按 1MP 等比） |
-| `qwen3_tts` | FLAC 24 kHz 单声道 4.0 s |
-| `ace_step_t2audio` | MP3 48 kHz 立体声 **15.0 s**（= `duration`） |
-| `video_minimax_h3_i2v` | MP4 h264 864×480@24fps + **AAC 32kHz 立体声** |
-| `video_minimax_h3_r2v` | MP4 h264 864×480@24fps + AAC 立体声 |
-| `video_minimax_h3_t2v` | MP4 h264 864×480@24fps + AAC 立体声 |
+7 条工作流全部真实跑通并落盘（产物在 `OUTPUT/mcp_smoke/`）；
+搜索侧 `web_search`（中/英）、`search_news`、`search_images`、`wiki_lookup`、
+`fetch_page`（单页 62,998 字符，offset 续读正常）均返回真实结果。
+逐工具的实测规格、耗时与踩坑见 **[comfyui_tools.md](comfyui_tools.md) §4**。
 
 > 🚫 **原第 8 条 FireRed Image Edit 1.1 —— 工具已删除（2026-09-13）**。2026-09-12 加入时只验证了
 > 参数注入与节点执行；**产物 5/5 全部纯黑（mean=0.0）** 却返回 `ok:true` ⇒ 零成功率，已整体移除。
 > 教训：**"ComfyUI 报 success" ≠ "产物可用"**，验收必须查像素或体积。
-
-### web-search（同日，免密钥）
-
-`web_search`（中/英）、`search_news`、`search_images`、`wiki_lookup`、
-`fetch_page`（单页抓到 62,998 字符，offset 续读正常）均返回真实结果。
 
 ---
 
@@ -221,7 +219,6 @@ CI 或改代码后可随时跑。当前状态：**全部通过**。
 ---
 
 ## 7. 设计原则（改代码前先读）
-
 1. **工具返回统一 JSON 字符串**：`{"ok": bool, ...}`；失败必带 `error` 字段，绝不抛裸异常给模型。
 2. **参数注入按 `class_type` 匹配节点**，与 `workflows/*.json` 的节点结构解耦，工作流微调不致失效。
 3. **可复现**：`seed=-1` 表示随机，但一定把**实际使用的 seed** 回传，便于复刻与前后的镜头对齐。

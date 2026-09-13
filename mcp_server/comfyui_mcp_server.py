@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """ComfyUI MCP Server — 《如愿·看见》（stem_fest）制作流水线
 
-把 ``workflows/`` 下的 8 条 ComfyUI 工作流封装为 MCP 工具，供 Cline 直接调用：
+把 ``workflows/`` 下的 9 条 ComfyUI 工作流封装为 MCP 工具，供 Cline 直接调用：
 
   🖼️ 图像层
     z_image_turbo_t2i        Z-Image-Turbo 文生图.json
@@ -14,6 +14,8 @@
   🎵 音频层
     qwen3_tts                Qwen3-TTS 语音合成.json
     ace_step_t2audio         ACE-Step 1.5 文生音频.json
+  🔎 识别层
+    qwen3_asr                Qwen3-ASR 语音识别.json   (配音核对：mp4 音轨 → 文字)
 
   🧰 辅助：comfyui_status / comfyui_upload_image / comfyui_get_result
 
@@ -40,6 +42,7 @@ import json
 import os
 import random
 import shutil
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -65,6 +68,7 @@ WORKFLOWS: dict[str, str] = {
     # 🚫 "firered": 已于 2026-09-13 **整体移除**（5/5 次运行产出纯黑图，零成功率）
     "tts": "Qwen3-TTS 语音合成.json",
     "ace": "ACE-Step 1.5 文生音频.json",
+    "asr": "Qwen3-ASR 语音识别.json",
     "h3_i2v": "video_minimax_h3_i2v.json",
     "h3_r2v": "video_minimax_h3_r2v.json",
     "h3_t2v": "video_minimax_h3_t2v.json",
@@ -299,7 +303,7 @@ def _upload_image(image_path: str, target_name: Optional[str] = None) -> str:
 
 # ── 输出收集与下载 ────────────────────────────────────────────────
 def _collect_outputs(history_entry: dict) -> list[dict]:
-    """从 history 中收集输出文件（兼容 images / gifs / videos / audio）。"""
+    """从 history 中收集输出文件（兼容 images / gifs / videos / audio / text）。"""
     outputs: list[dict] = []
     for node_id, nd in (history_entry.get("outputs") or {}).items():
         if not isinstance(nd, dict):
@@ -313,6 +317,16 @@ def _collect_outputs(history_entry: dict) -> list[dict]:
                         "type": item.get("type", "output"),
                         "node_id": node_id,
                     })
+        # SaveText 节点：文字结果可能内联在 history 里，也可能落成 .txt 文件
+        for item in nd.get("text") or []:
+            if isinstance(item, str):
+                outputs.append({
+                    "filename": "",
+                    "subfolder": "",
+                    "type": "text_inline",
+                    "node_id": node_id,
+                    "text": item,
+                })
     return outputs
 
 
@@ -347,14 +361,26 @@ def _save_outputs(history_entry: dict, out_dir: Path) -> list[dict]:
         items = [i for i in items if i["type"] == "output"]
     saved: list[dict] = []
     for item in items:
+        # 内联文字（SaveText）：直接返回，不落盘
+        if item["type"] == "text_inline":
+            saved.append({"path": None, "filename": None,
+                          "text": item.get("text", "")})
+            continue
         dst = out_dir / item["filename"]
         path = _download_file(item, dst)
         if path:
-            saved.append({
+            entry = {
                 "path": path,
                 "filename": item["filename"],
                 "size_kb": round(dst.stat().st_size / 1024, 1),
-            })
+            }
+            # .txt 结果顺手读出来，便于直接看到转写文本
+            if dst.suffix.lower() == ".txt":
+                try:
+                    entry["text"] = dst.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+            saved.append(entry)
     return saved
 
 
@@ -1041,6 +1067,171 @@ def comfyui_get_result(prompt_id: str, output_dir: Optional[str] = None) -> str:
         })
     except Exception as e:
         return _err(f"comfyui_get_result 失败: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🔎 音频层 · Qwen3-ASR（语音识别 / 配音核对）
+# ══════════════════════════════════════════════════════════════════
+AUDIO_EXT = {".wav", ".flac", ".mp3", ".m4a", ".ogg", ".opus", ".aac"}
+
+
+def _upload_audio(audio_path: str, target_name: Optional[str] = None) -> str:
+    """把本地音频注册到 ComfyUI input，返回 LoadAudio 可用的文件名。
+
+    与 `_upload_image` 同构：中文/空格名会破坏引用，统一归一化为 ASCII。
+    """
+    src = Path(audio_path)
+    if not src.is_absolute():
+        src = PROJECT_ROOT / src
+    if not src.exists():
+        raise FileNotFoundError(f"输入音频不存在: {src}")
+
+    fname = target_name or src.name
+    if any(ord(ch) > 127 for ch in fname) or " " in fname:
+        fname = f"mcp_audio_{uuid.uuid4().hex[:8]}{src.suffix.lower() or '.wav'}"
+
+    boundary = "----ComfyUIMCPAudio" + uuid.uuid4().hex
+    parts = [
+        f"--{boundary}\r\n".encode("utf-8"),
+        (
+            f'Content-Disposition: form-data; name="image"; filename="{fname}"\r\n'
+            f"Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8"),
+        src.read_bytes(),
+        f"\r\n--{boundary}--\r\n".encode("utf-8"),
+    ]
+    req = urllib.request.Request(
+        f"{COMFYUI_URL}/upload/image",
+        data=b"".join(parts),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read().decode("utf-8", errors="replace"))
+        name = result.get("name", fname)
+        sub = result.get("subfolder", "")
+        return f"{sub}/{name}" if sub else name
+    except Exception as e:
+        dst = _comfyui_input_dir() / fname
+        try:
+            shutil.copy2(src, dst)
+            return fname
+        except Exception:
+            raise RuntimeError(f"上传音频失败: {e}") from e
+
+
+def _extract_audio(media_path: Path) -> Path:
+    """从 mp4/mov 抽音轨为 16 kHz 单声道 wav（ComfyUI LoadAudio 只吃音频容器）。
+
+    已有音频文件则原样返回。依赖系统 ffmpeg。
+    """
+    if media_path.suffix.lower() in AUDIO_EXT:
+        return media_path
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError(
+            f"输入是视频（{media_path.suffix}）但系统里找不到 ffmpeg ⇒ 无法抽音轨。"
+            "请安装 ffmpeg 或直接传入音频文件。"
+        )
+    dst = media_path.with_name(media_path.stem + "_asr16k.wav")
+    proc = subprocess.run(
+        [ffmpeg, "-y", "-v", "error", "-i", str(media_path),
+         "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", str(dst)],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0 or not dst.exists():
+        raise RuntimeError(f"抽音轨失败: {(proc.stderr or '')[:400]}")
+    return dst
+
+
+@mcp.tool()
+def qwen3_asr(
+    audio: str,
+    language: str = "auto",
+    context: str = "",
+    return_timestamps: bool = False,
+    precision: str = "bf16",
+    local_model_path: str = "",
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 900,
+) -> str:
+    """Qwen3-ASR 语音识别（工作流 `Qwen3-ASR 语音识别.json`）—— 用来**核对配音/台词**。
+
+    ★ 典型用途：H3 生成的片段**配音对不对**，靠耳朵听不可靠 ⇒ 用本工具把 mp4 的
+    音轨转成文字，与 `storyboard.md` 的台词原文逐字比对（含中文方言/口音，52 语种）。
+
+    Args:
+        audio: 音频或视频路径（**可直接传 .mp4**，内部用 ffmpeg 抽 16 kHz 单声道音轨），
+            相对路径按项目根解析，自动上传到 ComfyUI input。
+        language: 语言，默认 "auto"（自动识别）；可强制如 "Chinese" / "English"。
+        context: 上下文提示（帮助模型认专有名词/人名），默认空。
+        return_timestamps: True 时输出带时间戳（需模型支持）。
+        precision: 模型精度，默认 bf16（16GB 显存下推荐）。
+        local_model_path: 本地模型目录；留空则用工作流里的 `repo_id`
+            （`Qwen/Qwen3-ASR-0.6B`，需已下载到 `models/Qwen3-ASR/`）。
+        filename_prefix: 转写文本的保存前缀，默认 `asr/<时间戳>`。
+        output_dir: 输出目录，默认 `OUTPUT/asr`。
+        wait: True 阻塞等待并返回转写文本；False 仅提交。
+        timeout_seconds: 等待超时秒数。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, text, files, ...}；
+        `text` 即转写结果（内联返回，无需再打开文件）。
+    """
+    try:
+        src = Path(audio)
+        if not src.is_absolute():
+            src = PROJECT_ROOT / src
+        if not src.exists():
+            return _err(f"输入不存在: {src}")
+
+        # 视频 → 先抽音轨
+        media = _extract_audio(src)
+        audio_name = _upload_audio(str(media))
+        if media != src:
+            try:
+                media.unlink()      # 清理临时 wav
+            except Exception:
+                pass
+
+        wf = _load_workflow("asr")
+
+        # LoadAudio.audio ← 上传后的文件名
+        _set_inputs(wf, "LoadAudio", audio=audio_name)
+
+        # Qwen3ASRTranscribe：language / context / return_timestamps
+        _set_inputs(wf, "Qwen3ASRTranscribe",
+                    language=language,
+                    context=context,
+                    return_timestamps=bool(return_timestamps))
+
+        # Qwen3ASRLoader：精度 / 本地模型路径（留空沿用 repo_id）
+        loader_payload: dict[str, Any] = {"precision": precision}
+        if local_model_path.strip():
+            loader_payload["local_model_path"] = local_model_path.strip()
+        _set_inputs(wf, "Qwen3ASRLoader", **loader_payload)
+
+        prefix = filename_prefix or f"asr/{_now()}"
+        _set_inputs(wf, "SaveText", filename_prefix=prefix, format="txt")
+
+        out_dir = _resolve_output_dir(output_dir, "asr")
+        result = json.loads(_run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "qwen3_asr",
+            "workflow": WORKFLOWS["asr"],
+            "audio": audio_name,
+            "language": language,
+        }))
+
+        # 把转写文本提到顶层，便于直接阅读
+        if isinstance(result, dict) and result.get("files"):
+            texts = [f.get("text") for f in result["files"] if f.get("text")]
+            if texts:
+                result["text"] = "\n".join(texts).strip()
+        return _dump(result)
+    except Exception as e:
+        return _err(f"qwen3_asr 失败: {e}")
 
 
 if __name__ == "__main__":
