@@ -259,8 +259,9 @@ py -3.10 OUTPUT/_make_group.py --force --all               # 覆盖已存在的�
 
 > 📌 **唯一出处 = `OUTPUT/_diag_act*.py` 的 `NO_SPEECH` 常量**（2026-09-15 六幕已全部改为正向音景）；
 > 上表只是**模式说明**，不要从这里抄具体字句。
-> 🔍 **改完必跑**：`py -3.10 OUTPUT/_scan_hazard.py` —— 扫全片 prompt 里的"对模型说的话"
-> （括号指令 / 本镜指代 / 否定祈使 / 条件指令 / 内心描述 / 制作备忘），清单落 `OUTPUT/_prompt_hazard.txt`。
+> 🔍 **改完必跑（两道）**：`_scan_hazard.py`（**粗筛**，列清单，有误报）→ `_verify_prompt_clean.py`
+> （★ **闸门**：只校验**拼接后的真 prompt**，规则更严、**非 0 退出即禁止开跑** —— 以它为准）。
+> 🗂️ **该重跑哪些镜**：`_plan_rerun.py` 按「视频 mtime < 修复时间 / 高危镜号 / 缺视频」判定 → `OUTPUT/_rerun_list.txt`。
 > ⚠️ **它是粗筛，实测有噪声**（2026-09-15 复核 126 镜 = 97 命中，逐条核实后大部分是误报）：
 > · **R6「制作备忘」94 镜几乎全是误报** —— `（后期）` 在 `strip_late_audio()` 阶段会被**整句剔除**，根本不进 H3 prompt；
 > · **R3 会误伤词内"不可"** —— 如「嘴角几乎**不可**察地一挑」被当成否定祈使。
@@ -443,10 +444,11 @@ H3 分不清"指令"与"台词"，一律当词句输出。
 
 **自查命令**（改完任何 prompt 后跑）：
 ```powershell
-py -3.10 OUTPUT/_scan_hazard.py          # ★ 首选：6 条规则扫"对模型说的话"（§6.4 三类事故全覆盖）
-                                         #   清单落 OUTPUT/_prompt_hazard.txt；--show=5 看某镜 prompt 全文
-                                         #   ⚠️ 粗筛有噪声：R6 的「（后期）」会被 strip_late_audio() 剔除（误报）；
+py -3.10 OUTPUT/_scan_hazard.py          # ① 粗筛：6 条规则扫"对模型说的话"（清单落 OUTPUT/_prompt_hazard.txt）
+                                         #    ⚠️ 有噪声：R6 的「（后期）」会被 strip_late_audio() 剔除（误报）；
                                          #      R3 误伤词内"不可"（如「几乎不可察」）⇒ 命中需逐条人工核实
+py -3.10 OUTPUT/_verify_prompt_clean.py  # ② ★ **闸门**：只校验**拼接后的真 prompt**（含 + CONST 展开），
+                                         #    规则更严、非 0 退出即禁止开跑 —— 以这个为准
 py -3.10 OUTPUT/_scan_prompt_meta.py     # 历史脚本：只扫"元信息"写法，应为 0 处
 ```
 
