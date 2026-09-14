@@ -4,7 +4,15 @@ __pycache__/
 *$py.class
 
 # === 生成产物 / 成片（不入库）===
-OUTPUT/
+# 规则：OUTPUT/ 下的**产物**（图 / 视频 / 音频 / 日志 / 报告 txt / bak）一律不入库；
+#       但**脚本（.py）与文档（.md）入库** —— 它们是项目资产：README §2 目录树里逐个列出，
+#       且多处注明"脚本是唯一出处"（如 _make_group.py 的 COMBOS、_diag_* 系列常驻自检）。
+# ⚠️ 必须用 `OUTPUT/*`（只忽略直接子项，含子目录）：git 不递归进被忽略的目录，
+#    所以下面两条 `!` 才能把顶层 .py / .md 重新收回来；
+#    子目录里的产物（如 OUTPUT/01_paper_plane/video/*.mp4）依旧不入库。
+OUTPUT/*
+!OUTPUT/*.py
+!OUTPUT/*.md
 
 # === 素材图片（大体积，本地存放，不入库）===
 # 只忽略 ASSETS 下的图片文件；目录骨架（.gitkeep）与说明文档（.md）照常入库

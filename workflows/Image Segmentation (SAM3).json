@@ -1,0 +1,103 @@
+{
+  "114": {
+    "inputs": {
+      "image": "z-image-turbo_00015_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "120": {
+    "inputs": {
+      "mask_opacity": 0.5,
+      "mask_color": "255, 255, 255",
+      "pass_through": false,
+      "image": [
+        "114",
+        0
+      ],
+      "mask": [
+        "99:75",
+        0
+      ]
+    },
+    "class_type": "ImageAndMaskPreview",
+    "_meta": {
+      "title": "ImageAndMaskPreview"
+    }
+  },
+  "121": {
+    "inputs": {
+      "bboxes": [
+        "99:75",
+        1
+      ],
+      "image": [
+        "114",
+        0
+      ]
+    },
+    "class_type": "DrawBBoxes",
+    "_meta": {
+      "title": "绘制边界框"
+    }
+  },
+  "122": {
+    "inputs": {
+      "images": [
+        "121",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "预览图像"
+    }
+  },
+  "99:75": {
+    "inputs": {
+      "threshold": 0.5,
+      "refine_iterations": 2,
+      "individual_masks": false,
+      "model": [
+        "99:77",
+        0
+      ],
+      "image": [
+        "114",
+        0
+      ],
+      "conditioning": [
+        "99:78",
+        0
+      ]
+    },
+    "class_type": "SAM3_Detect",
+    "_meta": {
+      "title": "SAM3 检测"
+    }
+  },
+  "99:77": {
+    "inputs": {
+      "ckpt_name": "sam3.1_multiplex_fp16.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Checkpoint加载器（简易）"
+    }
+  },
+  "99:78": {
+    "inputs": {
+      "text": "book",
+      "clip": [
+        "99:77",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  }
+}
