@@ -76,8 +76,8 @@ P_RICE_PLANT = os.path.join(PROPS, "04_rice_plant", "rice_plant_hero_v01.png")
 
 # 无台词镜的通用禁语音后缀（2026-09-13 按 README §4.4 重写）
 NO_SPEECH = (
-    "【本镜不要生成任何可辨认的语音或对白。只允许环境音与物件音；"
-    "若画面有人群，也只是听不清的杂音，不要生成任何词句。】"
+    "Audio: 田野开阔地的环境底噪；风吹稻叶的沙沙声与虫鸣；"
+    "远处零星的人声杂音，听不清任何词句。"
 )
 
 # ★ 音频三层分工（README §4.4）：带「（后期）」的音效不进 H3 prompt，由 ace_step_t2audio 后期铺。

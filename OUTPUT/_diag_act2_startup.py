@@ -80,8 +80,8 @@ P_HOLO_SCREEN = os.path.join(ROOT, "ASSETS", "PROPS", "03_holo_screen", "holo_sc
 
 # 无台词镜的通用禁语音后缀（2026-09-13 按 README §4.4 重写）
 NO_SPEECH = (
-    "【本镜不要生成任何可辨认的语音或对白。只允许环境音与物件音；"
-    "若画面有人群，也只是听不清的杂音，不要生成任何词句。】"
+    "Audio: 安静的室内环境底噪；衣料摩擦声与呼吸声；"
+    "远处模糊的人声杂音，听不清任何词句。"
 )
 
 # ★ 音频三层分工（README §4.4）：带「（后期）」的音效不进 H3 prompt，由 ace_step_t2audio 后期铺。
