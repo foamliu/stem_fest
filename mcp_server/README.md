@@ -146,7 +146,7 @@ OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
 | `video_minimax_h3_t2v` | `video_minimax_h3_t2v.json` | 文生视频（UI 动画 / 无角色镜头） |
 | `qwen3_tts` | `Qwen3-TTS 语音合成.json` | 角色配音 / 旁白 |
 | `ace_step_t2audio` | `ACE-Step 1.5 文生音频.json` | 配乐 BGM / 合成音效 |
-| `qwen3_asr` | `Qwen3-ASR 语音识别.json` | 配音核对（mp4 音轨 → 文字） |
+| `qwen3_asr` | `Qwen3-ASR 语音识别.json` | 配音核对（mp4 音轨 → 文字）<br>★ **词级时间戳**节点已支持（`Qwen3-ForcedAligner-0.6B`），**工具未接线** → `comfyui_tools.md` §6.7 |
 | `image_segmentation_sam3` | `Image Segmentation (SAM3).json` | **开放词汇检测 / 分割**（图片或视频抽帧 → 框图 + 掩膜 + 覆盖率，验收用） |
 | `comfyui_status` | — | 服务 / 队列 / 显存 / 工作流文件检查 |
 | `comfyui_upload_image` | — | 上传参考图到 ComfyUI `input` |
@@ -210,6 +210,11 @@ CI 或改代码后可随时跑。当前状态：**全部通过**。
 > **离线自检 + ffmpeg 抽帧 / 覆盖率口径已真机实测通过**；真实 ComfyUI 端到端**因全片批量占用队列未跑**
 > （按 §6.1 #8 的纪律不插任务）。用法、调参口诀与验收口径见
 > **[comfyui_tools.md §6.6](comfyui_tools.md)**。
+
+> 🧭 **2026-09-15 · Agent 侧能力与边界（动手前先读）**：基模**自带视觉**但额度 ≈7 张/会话、**不可复现**、
+> 读不准低对比度小字与任何数值 ⇒ 验收一律落**数值**；`qwen3_asr` 的**词级时间戳节点已支持但工具未接线**
+> （**不需要** WhisperX）；**两套 Python 环境别混**（MCP = `py -3.10`，ComfyUI = 它自己的环境）。
+> 📖 全表 → 项目 **[README.md §4.5 Agent 能力地图](../README.md)**；`qwen3_asr` 接线细则 → **[comfyui_tools.md §6.7](comfyui_tools.md)**。
 
 ---
 

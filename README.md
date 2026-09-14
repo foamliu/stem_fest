@@ -199,8 +199,15 @@ py -3.10 OUTPUT/_make_group.py --force --all               # 覆盖已存在的�
 
 ### 4.3 ★ 看图与验收（三条路，按优先级）
 
-1. **主模型直接读图**（最快）—— ⚠️ 每条会话图片额度有限，实测读 **~7 张**后静默丢弃，**新开会话恢复**。
-   省额度：只读关键的、大图先缩到 ≤1024 px（`OUTPUT/_view.py`）、**多张拼成 montage 再读**。
+1. **主模型直接读图**（最快）—— ⚠️ 额度 ≈ **7 张/会话**，超出后**静默丢弃**，且 **Agent 无法自救**
+   （不能自己"新开会话"恢复）。
+   ✅ **强项**：一图覆盖多镜 —— 联系表实测 **1 张图 ≈ 6 镜 × 4 帧**（镜号 / 景别 / 主体 / 人数 / 服装 / 道具 /
+   构图 / 明显崩图 / 明显字幕水印 / **品牌露出**都能给）。
+   ❌ **弱项**：低对比度小字、乱码、**逐字精确**（实测字幕条只能读大意且会错字）、以及**任何数值**
+   （相似度 / 覆盖率 / 响度）。
+   省额度：只读关键的、大图先缩到 ≤1024 px（`OUTPUT/_view.py`）、**多张拼成 montage 再读**
+   —— **"大而少"优于"小而全"**：宽幅横条能读大意，12 行小裁剪堆叠就只能判"有没有"。
+   📖 **读图边界与两条硬规则 → 本文件 §4.5 E**。
 2. **本地 `qwen3.5:latest`**（可脚本化的批量核查）—— 用法与踩坑见 `ASSETS/README.md` §7。
    ⚠️ **跑批期间绝对不要调它**：常驻 5.5 GB 显存会把 H3 挤爆。
 3. **数值法**（客观可复现，额度耗尽时首选）—— 用 PIL 现算：整图 RGB 均值 / 饱和度、
@@ -228,13 +235,127 @@ py -3.10 OUTPUT/_make_group.py --force --all               # 覆盖已存在的�
 ⇒ 改用显式标记 **`（后期）`** 后缀，生成脚本的 `strip_late_audio()` 会在拼 prompt 时
 **自动剔除该整句**，只把 L1 台词交给 H3。三个生产脚本均已内置该函数并在 `run_shot()` 里调用。
 
-**`NO_SPEECH` 文案**（无台词镜必须挂，否则 H3 会幻觉出人声 —— 实测镜 4 出"啊"、镜 5 出整句胡话）：
+**`NO_SPEECH` 文案**（无台词镜必须挂，否则 H3 会幻觉出人声 —— 实测镜 4 出"啊"、镜 5 出整句胡话）
+
+> ⛔ **旧版（2026-09-13 的"否定式指令"）已作废 —— 它本身就是污染源**：
+> ```
 > 【本镜不要生成任何可辨认的语音或对白。只允许环境音与物件音；
-> 若画面有人群，也只是听不清的杂音，不要生成任何词句。】
+>  若画面有人群，也只是听不清的杂音，不要生成任何词句。】
+> ```
+> 2026-09-15 视觉检查**实锤**：H3 把这段"对模型说的话"当台词，**渲染成了画面字幕**
+> —— 镜 5 底部出现「本镜不要生成任何可□旁白」。**H3 分不清"指令"与"台词"**（同 §6.4）。
+> ⚠️ 括号里的字**各次读法不一**（`_diag_act0_plane.py` 记「可语午白」、`_scan_hazard.py` 记「可口旁白」）
+> —— 这正印证 §4.5 E：**模型画出来的就是乱码，读图判不准逐字**；判"多了字"可以，判"多了什么字"要靠 OCR / 逐帧对比。
 
-> 📖 **分层台词逐镜分布**（哪些镜有 L1、哪些是 `（后期）`）→ `storyboard.md` 各幕逐镜表「台词/音效」列。
+✅ **新写法：正向音景描述** —— 只说**有什么声音**，绝不说"不要什么"；音景本身**不含可读词句**：
 
----
+| 幕 / 场景 | 模式（各幕脚本按各自场景定制，照抄脚本为准） |
+|---|---|
+| 室内（序幕一·教室） | `Audio: 安静的室内环境底噪；轻微的衣料摩擦声与呼吸声；远处传来模糊的人群杂音，听不清任何词句。` |
+| 野外（第一幕·战壕） | 野外开阔地环境底噪 ＋ 风吹土壁与沙袋的气流声 ＋ 远处零星人声杂音 |
+| 田野（第二幕·稻田） | 田野开阔地底噪 ＋ 风吹稻叶沙沙声与虫鸣 ＋ 远处零星人声 |
+| 车厢（第三幕·高铁） | 车厢行进低频嗡鸣与轻微晃动 ＋ 环境底噪 ＋ 远处模糊人声 |
+| 夜晚教室（尾声） | 安静教室夜晚底噪 ＋ 笔记本风扇轻转 ＋ 衣料摩擦声与呼吸声 |
+
+> 📌 **唯一出处 = `OUTPUT/_diag_act*.py` 的 `NO_SPEECH` 常量**（2026-09-15 六幕已全部改为正向音景）；
+> 上表只是**模式说明**，不要从这里抄具体字句。
+> 🔍 **改完必跑**：`py -3.10 OUTPUT/_scan_hazard.py` —— 扫全片 prompt 里的"对模型说的话"
+> （括号指令 / 本镜指代 / 否定祈使 / 条件指令 / 内心描述 / 制作备忘），清单落 `OUTPUT/_prompt_hazard.txt`。
+> ⚠️ **它是粗筛，实测有噪声**（2026-09-15 复核 126 镜 = 97 命中，逐条核实后大部分是误报）：
+> · **R6「制作备忘」94 镜几乎全是误报** —— `（后期）` 在 `strip_late_audio()` 阶段会被**整句剔除**，根本不进 H3 prompt；
+> · **R3 会误伤词内"不可"** —— 如「嘴角几乎**不可**察地一挑」被当成否定祈使。
+> ✅ **真阳性示例**：`GUARD_HUANG` 造型守卫串里的「**不可**改成其他军装、**不可**摘下军帽」——同一类问题，**待整改**。
+
+### 4.5 ★ Agent 能力地图（**动手前先读**：能做什么 / 不能做什么 / 怎么取长补短）
+
+> 由来：2026-09-15 做"视频感知 & 审查"能力评估时，Agent 一开始**误判了三处**（把"台词核对"当缺口、
+> 把"音画同步"当成需要模型、把 ComfyUI 环境与 `py -3.10` 混为一谈）。此节把结论固化，
+> **以后不要再重新推导一遍**（含"结论纠正"见 §4.5 G）。
+
+**A. 已接线 · 现成能用**
+
+| 能力 | 用什么 | 备注 |
+|---|---|---|
+| 出图 / 出视频 / 配音 / 配乐 | `comfyui-drama` **12 工具** | 参数/约束见 `mcp_server/comfyui_tools.md` |
+| 联网查资料（含查工具、查文档） | `web-search` **6 工具** | 免密钥；只给 ~200 字摘要，长文配 `fetch_page` |
+| 台词**文本**核对（念错/漏念） | `qwen3_asr` | **可直接喂 `.mp4`**（内部抽 16 kHz 音轨）→ 与 `storyboard.md` 逐字比对 |
+| 画面"有没有某物 + 占多大" | `image_segmentation_sam3` | 图片**或视频抽帧**；给 `_bbox` / `_overlay` / `_mask` + 每帧 `mask_coverage`（0 = 没检出） |
+| 读图（定性判读） | **基模自带视觉** | 额度 ≈7 张/会话；边界见 §4.5 E |
+| **审查脚本**（**不是** MCP 工具，2026-09-15 起） | `OUTPUT/_subtitle_audit.py`（画面底部**字幕带**裁条拼图，一图塞 30+ 镜）、`_char_consistency.py`（镜头帧 **vs** 该镜定妆照**并排**，判"是不是同一个人"）、`_shot_refs.py`（镜号 → 参考图映射）、`_scan_hazard.py`（扫 prompt 里"对模型说的话"） | 这四个是"基模读图"的**放大器**：先把要判的东西做成**一张图 / 一份清单**，再交给读图或人工 |
+
+**B. 节点/模型已经支持、但工具没接线**（⇒ 这是"缺接线"，不是"缺工具"）
+
+| 项 | 断点（精确位置） | 接法（约 30 行） |
+|---|---|---|
+| ASR **词/字级时间戳** | ① `workflows/Qwen3-ASR 语音识别.json` 里 `Qwen3ASRLoader.forced_aligner` **写死 `"None"`**，且 MCP 工具未暴露<br>② `SaveText` 只接 `["2", 0]`（text）—— **时间戳在输出槽 2**，没接出来<br>③ `qwen3_asr` 结果整形只抓 `text`，返回里没有 `timestamps` | ① 选 `Qwen/Qwen3-ForcedAligner-0.6B`（`ComfyUI-Qwen3-ASR/nodes.py:116/159` 会自动下载）<br>② 加第二个 `SaveText ← ["2", 2]`，前缀 `{prefix}_ts`（避免与 text 同名）<br>③ 把时间轴提到返回顶层，并算派生指标：**首句起播秒 / 末句结束秒 vs 片长**（判"被片尾截断""前摇多长"） |
+| ASR 模型档位 | `Qwen3ASRLoader.repo_id` 固定 `Qwen/Qwen3-ASR-0.6B`（**1.7B 也已在本地**，中文更好） | 工具加 `repo_id` 参数即可切 |
+| SAM3 检测 | 已接线（2026-09-15） | 见 `comfyui_tools.md` §6.6 |
+
+> ⚠️ 对齐器模型 `Qwen3-ForcedAligner-0.6B`（≈1.2 GB）**本机尚未下载**（HF 缓存里只有两个 ASR 模型）。
+> 可提前下、**不占显存**：`hf download Qwen/Qwen3-ForcedAligner-0.6B --local-dir E:\code\ComfyUI\models\Qwen3-ASR\Qwen3-ForcedAligner-0.6B`
+> （本机已确认有 `hf.exe` / `huggingface-cli.exe`；也可留给节点首启自动下载，或走 `source: ModelScope`）。
+
+**C. 本机零安装就能做（不碰 GPU ⇒ 跑批期间也安全）**
+
+ffmpeg **已实测**带这些滤镜：`blackdetect` / `freezedetect` / `silencedetect` / `ebur128` / `scdet` / `blend`；`ffprobe` 取规格。
+
+```powershell
+# ① 规格 + 音画时长差（同步性），② 黑帧，③ 静帧，④ 静音，⑤ 场景硬切，⑥ 响度
+ffprobe -v error -show_entries stream=codec_type,codec_name,width,height,r_frame_rate,duration,nb_frames -of default=nw=1 <file>
+cmd /c "ffmpeg -nostats -v info -i <file> -vf blackdetect=d=0.2:pix_th=0.10 -an -f null - 2>&1"
+cmd /c "ffmpeg -nostats -v info -i <file> -vf freezedetect=n=-60dB:d=0.5    -an -f null - 2>&1"
+cmd /c "ffmpeg -nostats -v info -i <file> -af silencedetect=n=-50dB:d=0.4   -vn -f null - 2>&1"
+cmd /c "ffmpeg -nostats -v info -i <file> -vf scdet=threshold=10            -an -f null - 2>&1"
+cmd /c "ffmpeg -nostats -v info -i <file> -filter_complex ebur128=peak=true      -f null - 2>&1"
+```
+> PS 里必须用 `cmd /c "… 2>&1"` 包一层（ffmpeg 日志走 stderr，否则抛 `NativeCommandError`）→ §6.5 #8。
+
+**实测样例**（`OUTPUT/01_paper_plane/video/01_girl_mother_at_school_gate_00001_.mp4`，2026-09-15）：
+1056×608@24fps / 73 帧；视频 3.0417 s、音频 3.0420 s（**音画差 0.3 ms**）；无黑帧 / 无静帧 / 无静音 / 无硬切；
+**I = −10.3 LUFS、LRA = 20.0 LU、真峰 −2.1 dBFS**（响度偏高、动态过大 ⇒ 后期要压）。
+
+**D. 没有的能力 → 获取方式**（2026-09-15 调研，全部开源离线方案；**装到 `py -3.10`**）
+
+| 缺口 | 方案 | 获取 |
+|---|---|---|
+| 画面文字 **OCR**（字幕污染 / 水印，要求逐字可复现） | **RapidOCR 1.4.4**（Apache-2.0，纯 CPU onnxruntime） | `pip install rapidocr-onnxruntime` |
+| **镜头硬切点**（秒） | **PySceneDetect** | `pip install scenedetect`（或 `scenedetect-headless`） |
+| **人脸相似度**（跨镜角色漂移量化） | **InsightFace / ArcFace** | `pip install onnxruntime insightface` |
+| **多帧视频理解**（时序 / 动作 / 运镜） | ① **ollama**：`ollama pull qwen3-vl:8b`（本机 0.34.0 ≥ 官方要求 0.12.7 ✅）<br>② **ComfyUI-QwenVL** v2.3.2（Qwen3-VL 2B~32B / Qwen2.5-VL / GGUF，**原生吃视频帧序列**，带 token 预算守护；附 `qwenvl_cli.py` 可命令行直调） | ② `git clone` 到 `ComfyUI/custom_nodes` + `pip install -r requirements.txt`（**跑批结束后再装**：抢显存） |
+| 说话人分离（谁在说） | pyannote（需 HF token） | **低优先**：H3 单/双人镜用不到 |
+
+**D-2. 已有但常被忽略的本地 VLM**：ollama `qwen3.5:latest`（9.7B Q4_K_M，`capabilities = vision / completion / tools / thinking`，ctx 262144）、`llava:latest`（7B vision）。
+用途：**批量**帧描述（Agent 不在会话里也跑得动）；⚠️ **跑批期间禁用**（§6.1 #11，5.5 GB 常驻会挤爆 H3）。
+（`gemma3:4b` / `gemma3:1b` 在 ollama 里只报 `completion`，别当视觉模型用。）
+
+**E. 基模读图的边界（实测，2026-09-15；3 张真实审查材料）**
+
+| ✅ 能读 | ❌ 读不准 / 读不到 |
+|---|---|
+| 联系表一图覆盖 **6 镜×4 帧**：镜号、景别、主体、人数、服装、道具、环境、明显崩图<br>★ **实锤**：2026-09-15 就是靠视觉检查发现**镜 5 / 镜 19 的底部字幕污染** | **低对比度小字 / 乱码 / 逐字精确**（实测字幕条 `_review_zoom/s91_bar.jpg` 只能读大意且有错字 ⇒ 判"**多了字**"可以，判"**多了什么字**"要靠 OCR / 逐帧对比） |
+| 明显字幕、水印、**品牌露出**（实测发现校服上疑似 adidas logo） | **音频**（我听不到）、**视频时序**（我放不了视频）、**帧号 / 秒数** |
+| 构图 / 景别 / 画面关系的**定性**判断 | **相似度、覆盖率、响度、切点秒数**等**任何数值** |
+
+> ⇒ **两条硬规则**：① 验收标准**必须落在数值上**（同 §6.1 #6：不能只看 ComfyUI 报 `success`）；
+> ② **读图只作线索、不作判据**，且**不可复现**（同一张图两次读可能不一致）。
+
+**F. 两套环境，别搞混（★ 最容易出错的地方）**
+
+| 用途 | 环境 | 说明 |
+|---|---|---|
+| MCP 服务器 / 一次性脚本 | **`py -3.10`** | 新依赖装这里。当前**没有** `cv2` / `onnxruntime` / `scenedetect` / `rapidocr` / `whisperx`（有 `numpy` / `PIL` / `huggingface_hub`） |
+| ComfyUI 节点 | **ComfyUI 自带环境** | `pip install -r requirements.txt` 要装进 **ComfyUI 的环境**；模型放 `ComfyUI/models/...`（例：`models/Qwen3-ASR/`、`models/checkpoints/sam3.1_multiplex_fp16.safetensors`） |
+
+⇒ 结论：**说"本机装没装某包"必须指明是哪套环境**（这次评估就在这儿栽过）。
+
+**G. 本次评估纠正的三个结论（防止重复推导）**
+
+| ❌ 错误结论 | ✅ 事实 |
+|---|---|
+| "台词核对是缺口" | **已有**：`qwen3_asr` 可直接喂 `.mp4` 做文本核对 |
+| "台词时间轴要装 WhisperX 做强制对齐" | **不需要**：ComfyUI-Qwen3-ASR 原生支持 `Qwen3-ForcedAligner-0.6B` 出**词/字级时间戳**，只是工具没接线（§4.5 B） |
+| "音画同步要用模型检测" | **不需要**：H3 是**音视频同一次生成**，天然同步；只需 `ffprobe` 比**音画时长差**（实测 0.3 ms） |
+
 
 ## 5. 内容层面的铁律（★ 违反必出废片）
 
@@ -279,6 +400,8 @@ py -3.10 OUTPUT/_make_group.py --force --all               # 覆盖已存在的�
 | 14 | **TTS `custom_speaker_name` 必须为空** | 仅在使用 `qwen3_tts` 时适用；该字段是音色 mixing 列表，填自定义名 → `ValueError` |
 | 15 | **H3 不一定生成环境音** | 镜 15 实测：只念了台词，前后段 ≈ −50 dB ⇒ **环境音另做**（见 §4.4 三层分工） |
 | 16 | ★ **"画面里有没有某物"别再靠肉眼猜** | 用 `image_segmentation_sam3`（SAM3 开放词汇检测）：图片**或视频抽帧** → 框图 + 掩膜 + 每帧 `mask_coverage`（**`0` = 没检出**）。调参口诀与验收口径 → `mcp_server/comfyui_tools.md` §6.6<br>⚠️ 每次提交都会换模型（1.6 GB），**跑批期间只用单图**，别拿它扫长视频 |
+| 17 | ★ **基模读图 ≠ 验收依据** | 额度 ≈ **7 张/会话**（超出静默丢弃，Agent 无法自救）、**不可复现**、读不准低对比度小字与任何数值 ⇒ 读图只作**线索**，判据一律用**数值**（见 §4.5 E） |
+| 18 | ★ **两套 Python 环境别搞混** | MCP 服务器/脚本 = **`py -3.10`**；ComfyUI 节点 = **ComfyUI 自己的环境**。查"装没装某包"必须说明在哪套里（见 §4.5 F） |
 
 ### 6.2 ★ **合成合影 / 多人参考图**（唯一新增的系统性坑）
 
@@ -296,12 +419,21 @@ py -3.10 OUTPUT/_make_group.py --force --all               # 覆盖已存在的�
 成片画面底部**真的出现了这行中文字幕**。原因：模型无法表演「像在消化…」这种
 **内心状态 / 镜头用意**，它能做的只有"把这句话显示出来"。
 
+**事故二（2026-09-15 镜 5 / 镜 19）—— 比镜 91 更隐蔽**：连**否定式指令**也会被渲染。
+- 镜 5 底部字幕「本镜不要生成任何可□旁白」← 来自 `NO_SPEECH` 常量（当时是「本镜不要生成任何…」）
+  <br>⚠️ `□` 处**逐字读不准**（两个脚本分别记成「可语午白」「可口旁白」）⇒ 印证 §4.5 E：判"多了字"可以，判"多了什么字"要靠 OCR
+- 镜 19 底部字幕「全镜高适」← 疑似同类幻觉（同样存在逐字不确定性）
+
+⇒ 根因统一为：**prompt 里出现"对模型说的话"**（本镜 / 不要生成 / 只允许 / 若画面…），
+H3 分不清"指令"与"台词"，一律当词句输出。
+📌 **对策**：`NO_SPEECH` 已改成正向音景（见 §4.4）；全片 prompt 用脚本扫一遍（见下）。
+
 | 写法 | 判定 |
 |---|:--:|
 | ✅ 摄影机拍得到的：动作、表情、景别、光线、环境、人数、衣着 | 安全 |
 | ❌ **比喻式内心状态**：像在…／仿佛…／像是…／显得… | **会被画成字幕** |
 | ❌ **镜头用意**：暗示…／表达…／说明…／观众要读到…／这是情绪高点 | **会被画成字幕** |
-| ❌ **镜头编号指代**：本镜／该镜／这一镜（`NO_SPEECH` 文案里的「本镜不要生成…」除外） | **会被画成字幕** |
+| ❌ **镜头编号指代**：本镜／该镜／这一镜 —— ⚠️ **`NO_SPEECH` 里的「本镜不要生成…」也曾被豁免，2026-09-15 实锤它照样被渲染成字幕 ⇒ 豁免取消，改正向音景（§4.4）** | **会被画成字幕** |
 
 **修法**：改写成可见的物理表现。
 ```
@@ -311,7 +443,11 @@ py -3.10 OUTPUT/_make_group.py --force --all               # 覆盖已存在的�
 
 **自查命令**（改完任何 prompt 后跑）：
 ```powershell
-py -3.10 OUTPUT/_scan_prompt_meta.py     # 应为 0 处；非 0 则逐条改掉
+py -3.10 OUTPUT/_scan_hazard.py          # ★ 首选：6 条规则扫"对模型说的话"（§6.4 三类事故全覆盖）
+                                         #   清单落 OUTPUT/_prompt_hazard.txt；--show=5 看某镜 prompt 全文
+                                         #   ⚠️ 粗筛有噪声：R6 的「（后期）」会被 strip_late_audio() 剔除（误报）；
+                                         #      R3 误伤词内"不可"（如「几乎不可察」）⇒ 命中需逐条人工核实
+py -3.10 OUTPUT/_scan_prompt_meta.py     # 历史脚本：只扫"元信息"写法，应为 0 处
 ```
 
 > 其他已验证的画面污染源：参考图里的**文字**（如人名标签、水印）也可能被画进画面。
@@ -328,6 +464,7 @@ py -3.10 OUTPUT/_scan_prompt_meta.py     # 应为 0 处；非 0 则逐条改掉
 | 5 | **robocopy 会预分配目标文件** | 中断后是"长度正常但内容为零"的假文件；**重拷前先删目标同名文件** |
 | 6 | `qwen3.5` 不关 thinking 会返回**空字符串** | 请求体加 `"think": False` |
 | 7 | 控制台中文乱码 ≠ 文件损坏 | PS 5.1 用 ANSI 读 UTF-8 的显示问题；用 `read_files` 或 Python 复核 |
+| 8 | `ffmpeg` 把日志写 **stderr**，PS 里 `2>&1` 会抛 `NativeCommandError`（命令"失败"但其实跑完了） | 用 `cmd /c "ffmpeg … 2>&1"` 包一层（照抄见 §4.5 C），或先 `$ErrorActionPreference='SilentlyContinue'` |
 
 > 📖 **ollama 侧的两条**（`ollama pull` 进度条报错 / 桌面版模型路径不读环境变量）→ `ASSETS/README.md` §7。
 
@@ -487,7 +624,10 @@ Get-Content OUTPUT/_finalize_state.txt -Encoding UTF8 -Tail 20
 | ComfyUI | `0.33.0` @ `http://127.0.0.1:8188`｜`COMFYUI_ROOT = E:\code\ComfyUI`（⚠️ 出图前先启动，启动后约 1 分钟才连得上） |
 | GPU | RTX 4090 Laptop **16 GB**（决定 `megapixels ≤ 0.6`） |
 | ollama | `0.34.0` @ `http://127.0.0.1:11434`；模型库 `E:\ollama\models` |
-| Python | `py -3.10`（MCP 服务器与脚本均用此版本） |
+| Python（**两套，别混**） | MCP 服务器 / 一次性脚本 = **`py -3.10`**（**没有** `cv2` / `onnxruntime` / `scenedetect` / `rapidocr` / `whisperx`；有 `numpy` / `PIL` / `huggingface_hub`）<br>ComfyUI 节点 = **ComfyUI 自带环境**（`pip install -r requirements.txt` 装那边；模型放 `ComfyUI/models/`） |
+| **本机零安装能力** | `ffmpeg`（**已带** `blackdetect` / `freezedetect` / `silencedetect` / `ebur128` / `scdet`）、`ffprobe`、`hf.exe` / `huggingface-cli.exe`（可预下模型，**不占显存**） |
+| **本地视觉模型** | ✅ ollama `qwen3.5:latest`（9.7B Q4_K_M，`vision`/`tools`/`thinking`，ctx 262144）、`llava:latest`（7B vision）｜⛔ `gemma3:*` 在 ollama 里只报 `completion`<br>⚠️ **跑批期间禁用**（§6.1 #11） |
+| **已就位的权重** | `models/checkpoints/sam3.1_multiplex_fp16.safetensors`（1.6 GB，SAM3 检测）、`models/Qwen3-ASR/{0.6B,1.7B}`（ASR）<br>❌ **缺** `Qwen3-ForcedAligner-0.6B`（≈1.2 GB，拿到词级时间戳要用 → §4.5 B） |
 | 磁盘 | C ⚠️ 2 GB / D 70.8 GB / E 47.2 GB |
 
 **自检命令**
@@ -496,6 +636,8 @@ Get-Content OUTPUT/_finalize_state.txt -Encoding UTF8 -Tail 20
 python mcp_server/selftest.py              # ComfyUI 套件（离线）
 python mcp_server/web_search_selftest.py   # 搜索套件（离线）
 python OUTPUT/_diag_shot_duration_audit.py # ★ 分镜时长复核（改台词后必跑）
+python OUTPUT/_scan_hazard.py              # ★ H3 prompt 字幕污染高危扫描（改 prompt 后必跑）→ §6.4
+python OUTPUT/_subtitle_audit.py           # ★ 画面底部字幕带抽检拼图（交给读图/人工复核）
 python OUTPUT/_diag_cast_per_char.py       # ★ 按角色统计 + 合影组合去重
 python OUTPUT/_make_group.py --list        # 合影拼版清单（不写文件）
 ```
@@ -512,5 +654,6 @@ python OUTPUT/_make_group.py --list        # 合影拼版清单（不写文件�
 | 画风 / 色调 / 风格后缀要对齐 | `ASSETS/STYLE/README.md`（**唯一出处**） |
 | 查 MCP 工具怎么注册 / 怎么用 | `mcp_server/README.md` |
 | 查工具参数、约束、实测数据、音频配方 | `mcp_server/comfyui_tools.md` |
+| **判断"这件事 Agent/工具能不能做、该用哪个、缺什么、装在哪套环境"** | 本文件 **§4.5 Agent 能力地图** |
 | **合影怎么做 / 组合 ↔ 镜号台账** | 本文件 **§4.2** 与 **§9** |
 | **各幕批量生成脚本怎么用** | 本文件 **§3 / §7.1**，每个脚本的文件头 docstring |

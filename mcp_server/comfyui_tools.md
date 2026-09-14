@@ -26,7 +26,7 @@
 | `video_minimax_h3_t2v` | `video_minimax_h3_t2v.json` | 文生视频（UI 动画 / 无角色镜头） |
 | `qwen3_tts` | `Qwen3-TTS 语音合成.json` | 角色配音 / 旁白（FLAC/MP3） |
 | `ace_step_t2audio` | `ACE-Step 1.5 文生音频.json` | 配乐 BGM / 合成音效（MP3） |
-| `qwen3_asr` | `Qwen3-ASR 语音识别.json` | 配音核对（mp4 音轨 → 文字） |
+| `qwen3_asr` | `Qwen3-ASR 语音识别.json` | 配音核对（mp4 音轨 → 文字）<br>★ **词级时间戳**：节点原生支持（`Qwen3-ForcedAligner-0.6B`），但**工具尚未接线** → §6.7 |
 | `image_segmentation_sam3` | `Image Segmentation (SAM3).json` | **开放词汇检测 / 分割**：文字 → 框图 + 掩膜 + 覆盖率；**图片或视频抽帧**（验收用） |
 | `comfyui_status` | — | 服务 / 队列 / 显存 / 工作流文件检查 |
 | `comfyui_upload_image` | — | 上传参考图到 ComfyUI `input` |
@@ -249,6 +249,34 @@ image_segmentation_sam3(image="...", prompt="rice plant:3, hand, hat")
 | **真实 ComfyUI 端到端（出图 + 覆盖率）** | ⏳ **未跑** —— 2026-09-15 全片批量正在占用队列，按 §6.1 #8 不插任务。**批量结束后补跑一次**：<br>`image_segmentation_sam3(image="ASSETS/PROPS/01_paper_plane/paper_plane_hero_v01.png", prompt="paper plane")`<br>验收口径：`mask_coverage > 0` 且 `_bbox` 图上的框套住纸飞机 |
 | ⚠️ 首次实跑留意：**注入节点用的是非数字 node id** | `mcp_save_overlay` / `mcp_mask_to_image` / `mcp_save_mask` —— ComfyUI API 接受任意唯一字符串 id（本工作流本身就带 `99:75` 这类子图 id），但这一条**只有真跑一次才算数**：若 `/prompt` 报 `invalid node id`，把这三个 key 改成 `9001/9002/9003` 即可（注入点在 `_sam3_apply`） |
 
+## 6.7 ★ `qwen3_asr`：台词核对（已接线）+ **词级时间戳（节点已支持 · 工具未接线）**
+
+**已接线**：`mp4 / flac / wav` 直接喂（内部 ffmpeg 抽 16 kHz 单声道）→ 转写文本 ⇒ **"台词念对没有"逐字核对已完全够用**
+（配合 `storyboard.md` 台词原文；`context` 可塞剧名/人名帮助识别）。
+
+**未接线**（2026-09-15 核实 `E:\code\ComfyUI\custom_nodes\ComfyUI-Qwen3-ASR`，**能力存在、只是没接**）
+
+| # | 断点 | 位置 | 接法 |
+|:-:|---|---|---|
+| ① | `forced_aligner` 写死 `None` | `workflows/Qwen3-ASR 语音识别.json` 的 `Qwen3ASRLoader`；MCP 工具也没暴露该参数 | 选 `Qwen/Qwen3-ForcedAligner-0.6B`（`nodes.py:116/159-167` 会自动下载并对齐器单独 `dtype/device_map`） |
+| ② | 时间戳**没接出工作流** | 节点 `nodes.py:192-223` 返回 **3 槽**：`text` / `language` / `timestamps`；而我们的 `SaveText` 只接 `["2", 0]` | 加第二个 `SaveText ← ["2", 2]`，`filename_prefix = {prefix}_ts`（**必须换前缀**，否则两个 SaveText 同名互撞） |
+| ③ | 返回里没有时间轴 | `qwen3_asr` 的结果整形只抓 `files[].text` | 把 `timestamps` 提到顶层；再加派生指标：**首句起播秒 / 末句结束秒 vs 片长**（判"被片尾截断""前摇多长""语速"） |
+
+**对齐器模型**（本机**尚未下载**，HF 缓存里只有 `Qwen3-ASR-0.6B/1.7B`）：
+
+```powershell
+# 预下（不占显存、跑批期间也能做）
+hf download Qwen/Qwen3-ForcedAligner-0.6B --local-dir E:\code\ComfyUI\models\Qwen3-ASR\Qwen3-ForcedAligner-0.6B
+# 或让节点首启自动下载（source 可选 ModelScope）
+```
+
+**注意事项**
+
+- 输出格式：`起始秒-结束秒: 文本`（逐行）——可直接与 `storyboard.md` 的分句、`_diag_shot_duration_audit.py` 的语速表交叉核对。
+- 模型档位：工作流固定 `Qwen/Qwen3-ASR-0.6B`；**`1.7B` 也已在本地**（中文台词质量更好），需要时加 `repo_id` 参数切换。
+- ⚠️ **别在跑批期间跑**：要加载 1.8 GB（ASR 0.6B）+ 1.2 GB（对齐器），可能把 H3 权重逐出 ⇒ 单镜重载代价远超本次检查收益（§6.1 #8 纪律）。
+- 📖 **Agent 侧的能力地图与"哪些缺口是真的"** → 项目 `README.md` **§4.5**。
+
 ---
 
 ## 7. 参数注入对照（维护者参考）
@@ -264,3 +292,4 @@ image_segmentation_sam3(image="...", prompt="rice plant:3, hand, hat")
 | H3 R2V | `PrimitiveStringMultiline.value`（prompt）· `LoadImage.image` ×2 · 其余同 I2V |
 | H3 T2V | `MiniMaxH3ImageToVideo.prompt` · 其余同 I2V |
 | SAM3 检测 / 分割 | `LoadImage.image`（图片或抽出的帧）· `CLIPTextEncode.text`（类别）· `SAM3_Detect.threshold/refine_iterations/individual_masks` · `CheckpointLoaderSimple.ckpt_name`（可选）<br>**外加 3 个注入节点**：`PreviewImage→SaveImage(_bbox)` · `SaveImage(_overlay)` ← `ImageAndMaskPreview` 的 composite · `MaskToImage→SaveImage(_mask)` ← `SAM3_Detect` 的 masks |
+| Qwen3-ASR | `Qwen3ASRLoader.repo_id/precision/forced_aligner/local_model_path`（⚠️ `forced_aligner` 目前**写死 `"None"`**，工具未暴露）· `Qwen3ASRTranscribe.language/context/return_timestamps` · `SaveText.text ← ["2", 0]`<br>⚠️ **`timestamps` 在输出槽 `2`，尚未接出**（接法见 §6.7） |
