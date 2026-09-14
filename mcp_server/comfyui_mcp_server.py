@@ -16,6 +16,8 @@
     ace_step_t2audio         ACE-Step 1.5 文生音频.json
   🔎 识别层
     qwen3_asr                Qwen3-ASR 语音识别.json   (配音核对：mp4 音轨 → 文字)
+    image_segmentation_sam3  Image Segmentation (SAM3).json
+                             (开放词汇检测/分割；图片或**视频抽帧**逐帧体检)
 
   🧰 辅助：comfyui_status / comfyui_upload_image / comfyui_get_result
 
@@ -41,6 +43,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import time
@@ -69,6 +72,7 @@ WORKFLOWS: dict[str, str] = {
     "tts": "Qwen3-TTS 语音合成.json",
     "ace": "ACE-Step 1.5 文生音频.json",
     "asr": "Qwen3-ASR 语音识别.json",
+    "sam3": "Image Segmentation (SAM3).json",
     "h3_i2v": "video_minimax_h3_i2v.json",
     "h3_r2v": "video_minimax_h3_r2v.json",
     "h3_t2v": "video_minimax_h3_t2v.json",
@@ -1232,6 +1236,312 @@ def qwen3_asr(
         return _dump(result)
     except Exception as e:
         return _err(f"qwen3_asr 失败: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════
+# 🔍 检测层 · SAM3（开放词汇检测 / 分割；图片 or 视频抽帧体检）
+# ══════════════════════════════════════════════════════════════════
+VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+
+# SAM3 文本类别的写法（出处：`E:\code\ComfyUI\comfy\text_encoders\sam3_clip.py::_parse_prompts`）：
+#   逗号分隔可写多类别，`:N` 指定该类最多检出几个 —— 例 "paper plane:2, boy, sky"；
+#   CLIP 上限 32 token，括号会被剥掉（不做权重），请用最直白的英文名词。
+
+
+def _probe_duration(media: Path) -> float:
+    """读媒体时长（秒）：ffprobe 优先，回退解析 ffmpeg stderr；失败返回 0.0。
+
+    口径与 `OUTPUT/_visual_review.py::probe_dur()` 一致。
+    """
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe:
+        proc = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(media)],
+            capture_output=True, text=True,
+        )
+        try:
+            return float((proc.stdout or "").strip())
+        except Exception:
+            pass
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg:
+        proc = subprocess.run([ffmpeg, "-i", str(media)], capture_output=True, text=True)
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", proc.stderr or "")
+        if m:
+            return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    return 0.0
+
+
+def _extract_frames(video: Path, count: int, start: float, end: float,
+                    out_dir: Path) -> list[dict]:
+    """从视频**均匀抽帧**（默认避开首尾各 8%，防转场黑帧），返回 [{path, time_sec}]。
+
+    时间戳口径与 `OUTPUT/_visual_review.py::grab()` 一致；依赖系统 ffmpeg。
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError(
+            f"输入是视频（{video.suffix}）但系统里找不到 ffmpeg ⇒ 无法抽帧。"
+            "请安装 ffmpeg 或直接传图片。"
+        )
+    total = _probe_duration(video)
+    if total <= 0:
+        raise RuntimeError(f"读不到视频时长（ffprobe / ffmpeg 均失败）: {video}")
+    lo = max(0.0, float(start))
+    hi = min(float(end) if float(end) > 0 else total, total)
+    if hi <= lo:
+        raise RuntimeError(
+            f"抽帧区间非法：start={lo:.3f}s ≥ end={hi:.3f}s（视频时长 {total:.3f}s）"
+        )
+
+    frames_dir = out_dir / "_frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    # 帧图名保持 ASCII，避免 ComfyUI 上传时被改名后无法辨认
+    stem = "".join(ch for ch in video.stem if ord(ch) < 128)[:32] or "video"
+    frames: list[dict] = []
+    for i in range(count):
+        frac = (0.08 + 0.84 * i / (count - 1)) if count > 1 else 0.5
+        t = lo + (hi - lo) * frac
+        dst = frames_dir / f"{stem}_f{i:02d}.jpg"
+        subprocess.run(
+            [ffmpeg, "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", str(video),
+             "-frames:v", "1", "-q:v", "2", str(dst)],
+            capture_output=True,
+        )
+        if dst.exists() and dst.stat().st_size > 0:
+            frames.append({"path": str(dst), "time_sec": round(t, 3)})
+    if not frames:
+        raise RuntimeError(f"抽帧失败（0 帧）: {video}")
+    return frames
+
+
+def _mask_coverage(png_path: str) -> Optional[float]:
+    """掩膜图的**非零像素占比**（0-1）—— `0` 表示这一帧没检出目标。
+
+    ★ 这是 SAM3 的验收指标（`README.md` §6.1 #6 的口径：产物必须查像素，
+    不能只看 ComfyUI 报 success）。用 ffmpeg 解码成灰度裸流后数非零字节，
+    **不引入 PIL / numpy 依赖**；ffmpeg 不可用时返回 None（只少一个数值，不影响产物）。
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-v", "error", "-i", str(png_path),
+             "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+            capture_output=True,
+        )
+        raw = proc.stdout or b""
+        if not raw:
+            return None
+        return round((len(raw) - raw.count(0)) / len(raw), 6)
+    except Exception:
+        return None
+
+
+def _sam3_apply(wf: dict, image_name: str, prompt: str, threshold: float,
+                refine_iterations: int, individual_masks: bool,
+                ckpt_name: str, prefix: str) -> None:
+    """注入 SAM3 工作流，并把「边界框图 / 掩膜叠加图 / 原始掩膜图」落成**正式输出**。
+
+    原工作流只有 `PreviewImage` + `ImageAndMaskPreview`（都是临时预览文件），
+    直接提交会被 `_save_outputs` 当预览丢掉 ⇒ 这里补 `SaveImage` / `MaskToImage` 节点。
+
+    ⚠️ `individual_masks=True` 时**不挂原始掩膜分支**：0 检出时掩膜批次为空，
+    `MaskToImage → SaveImage` 会在 `images[0].shape` 上抛 IndexError（`nodes.py::SaveImage`）。
+    """
+    _set_inputs(wf, "LoadImage", image=image_name)
+    if prompt.strip():
+        _set_inputs(wf, "CLIPTextEncode", text=prompt.strip())
+    _set_inputs(wf, "SAM3_Detect",
+                threshold=float(threshold),
+                refine_iterations=int(refine_iterations),
+                individual_masks=bool(individual_masks))
+    if ckpt_name.strip():
+        _set_inputs(wf, "CheckpointLoaderSimple", ckpt_name=ckpt_name.strip())
+
+    # ① 边界框图：PreviewImage（temp）→ SaveImage（output）
+    _preview_to_save(wf, f"{prefix}_bbox")
+
+    # ② 掩膜叠加图：复用 ImageAndMaskPreview 的 composite 输出（它自己只出临时预览）
+    overlays = sorted(k for k, n in wf.items()
+                      if n.get("class_type") == "ImageAndMaskPreview")
+    if overlays:
+        wf["mcp_save_overlay"] = {
+            "class_type": "SaveImage",
+            "inputs": {"images": [overlays[0], 0],
+                       "filename_prefix": f"{prefix}_overlay"},
+        }
+
+    # ③ 原始掩膜（黑底白图）：供抠图 / 掩膜面积体检
+    detects = sorted(k for k, n in wf.items() if n.get("class_type") == "SAM3_Detect")
+    if detects and not individual_masks:
+        wf["mcp_mask_to_image"] = {
+            "class_type": "MaskToImage",
+            "inputs": {"mask": [detects[0], 0]},
+        }
+        wf["mcp_save_mask"] = {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["mcp_mask_to_image", 0],
+                       "filename_prefix": f"{prefix}_mask"},
+        }
+
+
+@mcp.tool()
+def image_segmentation_sam3(
+    image: str,
+    prompt: str = "",
+    threshold: float = 0.5,
+    refine_iterations: int = 2,
+    individual_masks: bool = False,
+    ckpt_name: str = "",
+    video_frames: int = 4,
+    video_start: float = 0.0,
+    video_end: float = 0.0,
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 600,
+) -> str:
+    """SAM3 开放词汇检测 / 分割（工作流 `Image Segmentation (SAM3).json`）。
+
+    ★ **"画面里到底有没有某样东西、它占多大"这类只能看图才能回答的问题，用它。**
+    给一张图（**或一段视频**）＋一个**文字**类别，返回三件套：
+    边界框图（`_bbox`）/ 掩膜叠加图（`_overlay`）/ 原始掩膜图（`_mask`）；
+    视频输入会均匀抽帧、逐帧检测，并回传每帧**掩膜覆盖率**
+    ⇒ 可用来验收"这一镜有没有纸飞机 / 目标是不是太小 / 第几帧出现"。
+
+    典型用途：
+      * H3 出片后抽查某镜是否真的出现了剧本要求的道具（纸飞机、稻穗、书本…）
+      * 量目标在画面里的**占比**（`mask_coverage`），判断"太小看不见 / 被遮挡"
+      * 拿掩膜 PNG 供后续抠图、局部重绘
+
+    Args:
+        image: 输入图片路径；**也可以是视频**（.mp4/.mov/.mkv/.webm/.avi/.m4v，
+            内部用 ffmpeg 均匀抽帧，见 `video_frames`）。相对路径按项目根解析。
+        prompt: 要找的东西（**英文效果最好**）。逗号分隔可写多类别，`:N` 指定该类最多
+            检出几个（例 `"paper plane:2, boy, sky"`）；CLIP 上限 32 token、括号会被
+            剥掉（不做权重），请用最直白的英文名词。留空 → 沿用工作流里写死的 "book"。
+        threshold: 检测阈值 0-1，越低越灵敏（默认 0.5）。漏检就降、误检就升。
+        refine_iterations: 掩膜精修迭代次数 0-5（默认 2；0 = 只用粗掩膜，最快）。
+        individual_masks: True 时每个目标一张掩膜；⚠️ 该模式**不额外保存原始掩膜图**
+            （0 检出时掩膜批次为空会让 SaveImage 报错），只给框图与叠加图。
+        ckpt_name: 自定义 SAM3 权重名；留空沿用工作流的 `sam3.1_multiplex_fp16.safetensors`。
+        video_frames: 输入是视频时的抽帧数 1-8（默认 4；均匀分布并避开首尾 8%）。
+        video_start: 抽帧起始秒（默认 0 = 片头）。
+        video_end: 抽帧结束秒；0 = 到片尾。
+        filename_prefix: 保存前缀，默认 `sam3/<时间戳>`；视频模式自动带帧号 `_f00`，
+            三类产物另加 `_bbox` / `_overlay` / `_mask` 后缀。
+        output_dir: 输出目录，默认 `OUTPUT/sam3`（抽出的帧图落在其 `_frames/` 子目录）。
+        wait: True 阻塞到完成并下载；False 只提交（视频模式逐帧提交、回传多个 prompt_id）。
+        timeout_seconds: **每帧**的等待超时秒数（SAM3 检测通常数十秒）。
+
+    Returns:
+        JSON 字符串：{ok, mode, prompt, frames:[{time_sec, mask_coverage, detected, files}],
+        summary:{frames, detected_frames, max_mask_coverage, mean_mask_coverage}}；
+        单图模式另把 prompt_id / files / mask_coverage / detected 提到顶层。
+        `mask_coverage` = 掩膜占画面比例，**0 = 这帧没检出目标**（None = 无 ffmpeg 无法体检）。
+    """
+    try:
+        src = Path(image)
+        if not src.is_absolute():
+            src = PROJECT_ROOT / src
+        if not src.exists():
+            return _err(f"输入不存在: {src}")
+        if not 0.0 <= float(threshold) <= 1.0:
+            return _err(f"threshold 必须在 0-1 之间，收到 {threshold}")
+        if not 0 <= int(refine_iterations) <= 5:
+            return _err(f"refine_iterations 必须在 0-5 之间，收到 {refine_iterations}")
+        if not 1 <= int(video_frames) <= 8:
+            return _err(f"video_frames 必须在 1-8 之间，收到 {video_frames}")
+
+        out_dir = _resolve_output_dir(output_dir, "sam3")
+        base = filename_prefix or f"sam3/{_now()}"
+        is_video = src.suffix.lower() in VIDEO_EXT
+        frames = (
+            _extract_frames(src, int(video_frames), video_start, video_end, out_dir)
+            if is_video else [{"path": str(src), "time_sec": None}]
+        )
+
+        meta_common = {
+            "tool": "image_segmentation_sam3",
+            "workflow": WORKFLOWS["sam3"],
+            "mode": "video" if is_video else "image",
+            "source": str(src),
+            "prompt": prompt.strip() or "(工作流默认)",
+            "threshold": float(threshold),
+            "refine_iterations": int(refine_iterations),
+            "individual_masks": bool(individual_masks),
+        }
+
+        per_frame: list[dict] = []
+        for i, fr in enumerate(frames):
+            tag = f"_f{i:02d}" if is_video else ""
+            wf = _load_workflow("sam3")
+            _sam3_apply(wf, _upload_image(fr["path"]), prompt, threshold,
+                        refine_iterations, individual_masks, ckpt_name, f"{base}{tag}")
+            run = json.loads(_run(wf, out_dir, wait, timeout_seconds, {
+                **meta_common,
+                "frame_index": i if is_video else None,
+                "time_sec": fr["time_sec"],
+                "frame_image": fr["path"],
+            }))
+            entry: dict[str, Any] = {
+                "frame_index": i,
+                "time_sec": fr["time_sec"],
+                "frame_image": fr["path"],
+                "prompt_id": run.get("prompt_id"),
+                "status": run.get("status"),
+                "files": run.get("files", []),
+            }
+            # ★ 掩膜面积体检：0 = 这帧没检出目标（不靠 ComfyUI 的 success 下结论）
+            areas = [
+                a for a in (
+                    _mask_coverage(f["path"]) for f in entry["files"]
+                    if f.get("path") and "_mask" in (f.get("filename") or "")
+                ) if a is not None
+            ]
+            entry["mask_coverage"] = max(areas) if areas else None
+            entry["detected"] = (None if entry["mask_coverage"] is None
+                                 else entry["mask_coverage"] > 0)
+            if run.get("error"):
+                entry["error"] = run["error"]
+            per_frame.append(entry)
+
+        areas_all = [e["mask_coverage"] for e in per_frame if e["mask_coverage"] is not None]
+        failed = [e for e in per_frame if not e.get("prompt_id") or e.get("error")]
+        result: dict[str, Any] = {
+            "ok": not failed,
+            "tool": "image_segmentation_sam3",
+            "mode": meta_common["mode"],
+            "status": ("queued" if not wait
+                       else ("success" if not failed else "partial_failure")),
+            "prompt": meta_common["prompt"],
+            "source": str(src),
+            "output_dir": str(out_dir),
+            "frames": per_frame,
+            "summary": {
+                "frames": len(per_frame),
+                "detected_frames": sum(1 for e in per_frame if e.get("detected")),
+                "max_mask_coverage": max(areas_all) if areas_all else None,
+                "mean_mask_coverage": (round(sum(areas_all) / len(areas_all), 6)
+                                       if areas_all else None),
+            },
+        }
+        if not is_video and per_frame:
+            result.update({
+                "prompt_id": per_frame[0]["prompt_id"],
+                "files": per_frame[0]["files"],
+                "mask_coverage": per_frame[0]["mask_coverage"],
+                "detected": per_frame[0]["detected"],
+            })
+        if not wait:
+            result["hint"] = ("逐帧已提交，用 comfyui_get_result(prompt_id) 取回"
+                              "（prompt_id 见 frames[].prompt_id）")
+        return _dump(result)
+    except Exception as e:
+        return _err(f"image_segmentation_sam3 失败: {e}")
 
 
 if __name__ == "__main__":

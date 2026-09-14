@@ -5,7 +5,7 @@
 
 | 服务器 | 名称 | 工具数 | 作用 | 依赖 |
 |--------|------|:------:|------|------|
-| `comfyui_mcp_server.py` | `comfyui-drama` | 11 | 驱动本机 ComfyUI 跑 8 条工作流 | ComfyUI 在线 + 模型就位 |
+| `comfyui_mcp_server.py` | `comfyui-drama` | 12 | 驱动本机 ComfyUI 跑 9 条工作流 | ComfyUI 在线 + 模型就位 |
 | `web_search_mcp_server.py` | `web-search` | 6 | 免 API Key 联网搜索/抓正文 | 仅需 `ddgs`（免密钥） |
 
 ```
@@ -88,7 +88,7 @@ pip install beautifulsoup4 lxml   # 可选：fetch_page 的 HTML 回退路径
 
 ```
 PROJECT_ROOT : E:\code\stem_fest
-WORKFLOW_DIR : E:\code\stem_fest\workflows   (8 个工作流齐备)
+WORKFLOW_DIR : E:\code\stem_fest\workflows   (9 个工作流齐备)
 OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
 相对 output_dir → 落在项目内；相对参考图 ASSETS/... 正常上传
 ```
@@ -135,7 +135,7 @@ OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
 
 ## 3. 工具索引
 
-### ① comfyui-drama — 生产管线（11 个）
+### ① comfyui-drama — 生产管线（12 个）
 
 | 工具 | 工作流 | 用途 |
 |------|--------|------|
@@ -146,6 +146,8 @@ OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
 | `video_minimax_h3_t2v` | `video_minimax_h3_t2v.json` | 文生视频（UI 动画 / 无角色镜头） |
 | `qwen3_tts` | `Qwen3-TTS 语音合成.json` | 角色配音 / 旁白 |
 | `ace_step_t2audio` | `ACE-Step 1.5 文生音频.json` | 配乐 BGM / 合成音效 |
+| `qwen3_asr` | `Qwen3-ASR 语音识别.json` | 配音核对（mp4 音轨 → 文字） |
+| `image_segmentation_sam3` | `Image Segmentation (SAM3).json` | **开放词汇检测 / 分割**（图片或视频抽帧 → 框图 + 掩膜 + 覆盖率，验收用） |
 | `comfyui_status` | — | 服务 / 队列 / 显存 / 工作流文件检查 |
 | `comfyui_upload_image` | — | 上传参考图到 ComfyUI `input` |
 | `comfyui_get_result` | — | 按 `prompt_id` 取回异步结果 |
@@ -202,6 +204,12 @@ CI 或改代码后可随时跑。当前状态：**全部通过**。
 > 🚫 **原第 8 条 FireRed Image Edit 1.1 —— 工具已删除（2026-09-13）**。2026-09-12 加入时只验证了
 > 参数注入与节点执行；**产物 5/5 全部纯黑（mean=0.0）** 却返回 `ok:true` ⇒ 零成功率，已整体移除。
 > 教训：**"ComfyUI 报 success" ≠ "产物可用"**，验收必须查像素或体积。
+
+> 🆕 **2026-09-15 新增 `image_segmentation_sam3`（SAM3 开放词汇检测 / 分割）**：图片**或视频抽帧** →
+> 框图 / 掩膜叠加 / 原始掩膜三件套，并回传每帧 **`mask_coverage`**（`0` = 这帧没检出目标）。
+> **离线自检 + ffmpeg 抽帧 / 覆盖率口径已真机实测通过**；真实 ComfyUI 端到端**因全片批量占用队列未跑**
+> （按 §6.1 #8 的纪律不插任务）。用法、调参口诀与验收口径见
+> **[comfyui_tools.md §6.6](comfyui_tools.md)**。
 
 ---
 

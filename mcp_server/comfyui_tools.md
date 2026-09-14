@@ -1,7 +1,7 @@
 # comfyui-drama MCP 服务器 · 短剧生产管线
 
-把 `workflows/` 下的 7 条 ComfyUI 工作流封装成 MCP 工具，让 Cline 直接驱动出图 / 出视频 /
-配音 / 配乐，而无需手写一次性 Python 脚本。
+把 `workflows/` 下的 9 条 ComfyUI 工作流封装成 MCP 工具，让 Cline 直接驱动出图 / 出视频 /
+配音 / 配乐 / **检测分割**，而无需手写一次性 Python 脚本。
 
 > 🚫 **2026-09-13 变更：`image_edit_firered` 工具已整体移除**（连带 `WORKFLOWS["firered"]` 注册项与
 > `selftest.py` 的 `[3b]` 用例）。该模型在本机 **5 次运行 5 张纯黑图（mean=0.0）、零成功率**，
@@ -26,6 +26,8 @@
 | `video_minimax_h3_t2v` | `video_minimax_h3_t2v.json` | 文生视频（UI 动画 / 无角色镜头） |
 | `qwen3_tts` | `Qwen3-TTS 语音合成.json` | 角色配音 / 旁白（FLAC/MP3） |
 | `ace_step_t2audio` | `ACE-Step 1.5 文生音频.json` | 配乐 BGM / 合成音效（MP3） |
+| `qwen3_asr` | `Qwen3-ASR 语音识别.json` | 配音核对（mp4 音轨 → 文字） |
+| `image_segmentation_sam3` | `Image Segmentation (SAM3).json` | **开放词汇检测 / 分割**：文字 → 框图 + 掩膜 + 覆盖率；**图片或视频抽帧**（验收用） |
 | `comfyui_status` | — | 服务 / 队列 / 显存 / 工作流文件检查 |
 | `comfyui_upload_image` | — | 上传参考图到 ComfyUI `input` |
 | `comfyui_get_result` | — | 按 `prompt_id` 取回异步结果 |
@@ -68,7 +70,7 @@
 python mcp_server/selftest.py
 ```
 
-离线运行，校验 11 个工具是否注册、以及每条工作流的参数是否注入到正确节点
+离线运行，校验 12 个工具是否注册、以及每条工作流的参数是否注入到正确节点
 （拦截 `_queue` 检查提交的 workflow，不依赖 ComfyUI 服务）。
 
 ---
@@ -144,6 +146,11 @@ python mcp_server/selftest.py
 | 🔒 **图生图只用 `image_edit_longcat`** | **不做 A/B 比较**；换背景/改色调/转老照片同样走它的图生图，不用文生图抽卡。🚫 `image_edit_firered` 工具**已于 2026-09-13 从工具列表删除**（5/5 纯黑图、零成功率） | 美术方 2026-09-13 定案 |
 | 参考图需先注册到 ComfyUI input | 工具已自动走 `/upload/image`；中文/空格文件名会自动改 ASCII | — |
 | 输出路径以 `ffprobe` 实测为准 | 不要相信注释里的分辨率 | `LESSONS_LEARNED.md` #10 |
+| SAM3 文本类别写法 | 逗号分隔可写多类别，`:N` 指定该类最多检出几个（`"paper plane:2, boy"`）；CLIP 上限 **32 token**，括号会被剥掉（不做权重），用最直白的英文名词 | `E:\code\ComfyUI\comfy\text_encoders\sam3_clip.py::_parse_prompts` |
+| SAM3 `individual_masks=True` 不给原始掩膜 | 0 检出时掩膜批次为空，`MaskToImage → SaveImage` 会在 `images[0]` 上抛 IndexError ⇒ 工具主动跳过该分支（框图 / 叠加图仍给） | `E:\code\ComfyUI\nodes.py::SaveImage` · 自检 `[4c]` |
+| SAM3 视频抽帧依赖系统 ffmpeg | 抽帧用 `ffmpeg`（时长用 `ffprobe`，失败回退解析 stderr）；缺 ffmpeg 时**只能传图片** | 与 `OUTPUT/_visual_review.py` 同口径 |
+| ★ **`mask_coverage = 0` 就是"没检出"** | 不要只看 ComfyUI 报 `success`（同 FireRed 教训）；覆盖率由 ffmpeg 解灰度裸流数非零像素得到，**不引 PIL/numpy** | 项目 `README.md` §6.1 #6 |
+| SAM3 权重 / 节点 | `models/checkpoints/sam3.1_multiplex_fp16.safetensors`（1.6 GB，本机已就位）+ ComfyUI 内置节点 `SAM3_Detect` / `MaskToImage` / `DrawBBoxes` | `E:\code\ComfyUI\comfy_extras\nodes_sam3.py` |
 
 ---
 
@@ -183,6 +190,67 @@ duration = 要铺多长就出多长（20s 成本约 30s 机时）
 
 ---
 
+## 6.6 ★ `image_segmentation_sam3` 用法与约束（2026-09-15 加入）
+
+**一句话**：给一张图（或一段视频）＋一个**文字类别**，回答"画面里到底有没有这东西、它占多大"。
+图像生成模型"报 success"和"画面里真有纸飞机"是两件事 —— 这个工具就是补上**画面证据**那一环。
+
+```python
+# ① 单图：某帧里到底有没有纸飞机
+image_segmentation_sam3(
+    image="OUTPUT/01_paper_plane/frames/03_girl_throwing_paper_plane_00001_.png",
+    prompt="paper plane", threshold=0.4)
+
+# ② 视频：整镜抽 4 帧逐帧体检（避开首尾 8% 防转场黑帧；跑批后再用！
+image_segmentation_sam3(
+    image="OUTPUT/01_paper_plane/video/03_girl_throwing_paper_plane_00001_.mp4",
+    prompt="paper plane:2, girl, sky", video_frames=4, threshold=0.4)
+
+# ③ 多类别 + 每类最多检出几个（`:N`）
+image_segmentation_sam3(image="...", prompt="rice plant:3, hand, hat")
+```
+
+**产物：每帧三件套（都是正式输出，不是临时预览）**
+
+| 后缀 | 内容 | 用途 |
+|---|---|---|
+| `_bbox` | 原图 + 检测框（`DrawBBoxes`） | **看懂图**：框住了什么、漏了什么 |
+| `_overlay` | 原图 + 掩膜叠加（`ImageAndMaskPreview` 的 composite） | 看分割轮廓贴不贴边 |
+| `_mask` | 黑底白掩膜 PNG | 抠图原料；`mask_coverage` 体检也读它 |
+
+**返回的关键数值**
+
+| 字段 | 含义 |
+|---|---|
+| `frames[].mask_coverage` | 掩膜占全画面比例（0-1）。**`0` = 这帧没检出目标**；`None` = 无 ffmpeg 无法体检 |
+| `frames[].detected` | `mask_coverage > 0`（`None` = 体检不可用） |
+| `frames[].time_sec` | 该帧取自第几秒（视频模式；单图模式为 `null`） |
+| `summary.detected_frames` / `max_mask_coverage` / `mean_mask_coverage` | 全片速览：几帧命中、最大与平均占比 |
+
+**调参口诀**
+
+| 症状 | 处理 |
+|---|---|
+| 漏检 | `threshold` 降到 0.3-0.4；`prompt` 换成更直白的英文名词（`paper plane` 好过 `origami aircraft`） |
+| 误检 | `threshold` 升到 0.6-0.7 |
+| 掩膜毛糙 / 缺角 | `refine_iterations` 2 → 3 |
+| 只想知道"有没有" | `refine_iterations=0`（最快，只用粗掩膜） |
+| 目标太多 | 用 `:N` 限制每类检出数，或 `individual_masks=True` 逐目标出掩膜 |
+
+> ⚠️ **跑批期间别用它测长视频**：每次提交都会让 ComfyUI 换模型（SAM3 1.6 GB），
+> 会打断正在跑的 H3 队列（见项目 `README.md` §6.1 #8 的纪律）。跑批中只用**单图**。
+
+**验证状态（2026-09-15）**
+
+| 项 | 结果 |
+|---|---|
+| 离线自检 `py -3.10 mcp_server/selftest.py` `[4c]` / `[4d]` | ✅ 通过（工具注册；参数注入 `SAM3_Detect`；注入的 `SaveImage(_bbox/_overlay)` + `MaskToImage → SaveImage(_mask)` 挂点正确；`individual_masks=True` 正确跳过掩膜分支；视频模式逐帧结构 / 帧号前缀 / summary） |
+| 三个 ffmpeg 辅助函数（抽帧 · 时长 · 覆盖率） | ✅ 真机实测：3.042 s 视频抽 3 帧 → 0.243 / 1.521 / 2.799 s；覆盖率口径 全黑 `0.0`、上半白 `0.5` |
+| **真实 ComfyUI 端到端（出图 + 覆盖率）** | ⏳ **未跑** —— 2026-09-15 全片批量正在占用队列，按 §6.1 #8 不插任务。**批量结束后补跑一次**：<br>`image_segmentation_sam3(image="ASSETS/PROPS/01_paper_plane/paper_plane_hero_v01.png", prompt="paper plane")`<br>验收口径：`mask_coverage > 0` 且 `_bbox` 图上的框套住纸飞机 |
+| ⚠️ 首次实跑留意：**注入节点用的是非数字 node id** | `mcp_save_overlay` / `mcp_mask_to_image` / `mcp_save_mask` —— ComfyUI API 接受任意唯一字符串 id（本工作流本身就带 `99:75` 这类子图 id），但这一条**只有真跑一次才算数**：若 `/prompt` 报 `invalid node id`，把这三个 key 改成 `9001/9002/9003` 即可（注入点在 `_sam3_apply`） |
+
+---
+
 ## 7. 参数注入对照（维护者参考）
 
 | 工作流 | 注入点 |
@@ -195,3 +263,4 @@ duration = 要铺多长就出多长（20s 成本约 30s 机时）
 | H3 I2V | `LoadImage.image` · `MiniMaxH3ImageToVideo.prompt` · `PrimitiveFloat.value` · `RandomNoise.noise_seed` · `ResolutionSelector.aspect_ratio/megapixels` · `BasicScheduler.steps` · `SaveVideo.filename_prefix` |
 | H3 R2V | `PrimitiveStringMultiline.value`（prompt）· `LoadImage.image` ×2 · 其余同 I2V |
 | H3 T2V | `MiniMaxH3ImageToVideo.prompt` · 其余同 I2V |
+| SAM3 检测 / 分割 | `LoadImage.image`（图片或抽出的帧）· `CLIPTextEncode.text`（类别）· `SAM3_Detect.threshold/refine_iterations/individual_masks` · `CheckpointLoaderSimple.ckpt_name`（可选）<br>**外加 3 个注入节点**：`PreviewImage→SaveImage(_bbox)` · `SaveImage(_overlay)` ← `ImageAndMaskPreview` 的 composite · `MaskToImage→SaveImage(_mask)` ← `SAM3_Detect` 的 masks |

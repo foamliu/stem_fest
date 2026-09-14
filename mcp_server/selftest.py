@@ -3,7 +3,7 @@
 """MCP 服务器离线自检 —— 不需要 ComfyUI 在线。
 
 校验两件事：
-  1. 11 个工具均已注册到 FastMCP（8 条工作流 + 3 个辅助工具）
+  1. 12 个工具均已注册到 FastMCP（9 条工作流 + 3 个辅助工具）
   2. 每条工作流的参数注入落到了正确的节点上（拦截 `_queue` 检查提交的 workflow）
 
 用法::
@@ -48,8 +48,14 @@ srv._save_outputs = lambda entry, out_dir: []                      # noqa: E731
 srv._upload_image = lambda p, target_name=None: "ref_test.png"     # noqa: E731
 srv._upload_audio = lambda p, target_name=None: "audio_test.wav"   # noqa: E731
 srv._extract_audio = lambda p: p                                   # noqa: E731
+# SAM3 视频模式：抽帧与掩膜体检都依赖 ffmpeg，离线用例改为桩
+srv._extract_frames = lambda video, count, start, end, out_dir: [  # noqa: E731
+    {"path": str(video), "time_sec": round(0.5 + i, 3)} for i in range(count)
+]
+srv._mask_coverage = lambda png: None                              # noqa: E731
 # ASR 用例需要一个存在的输入文件（真实路径检查在工具内）
 _ASR_FIXTURE = SERVER.parent.parent / "OUTPUT" / "_selftest_audio_fixture.wav"
+_VIDEO_FIXTURE = SERVER.parent.parent / "OUTPUT" / "_selftest_clip.mp4"
 
 
 def call(fn, **kwargs) -> tuple[dict, dict]:
@@ -73,12 +79,13 @@ def main() -> int:
     expected = [
         "ace_step_t2audio", "comfyui_get_result", "comfyui_status",
         "comfyui_upload_image", "image_edit_longcat",
+        "image_segmentation_sam3",
         "qwen3_asr", "qwen3_tts",
         "video_minimax_h3_i2v", "video_minimax_h3_r2v",
         "video_minimax_h3_t2v", "z_image_turbo_t2i",
     ]
-    _check("工具数量 = 11（FireRed 已于 2026-09-13 移除；qwen3_asr 已加入）",
-           len(tools) == 11,
+    _check("工具数量 = 12（FireRed 已于 2026-09-13 移除；qwen3_asr / image_segmentation_sam3 已加入）",
+           len(tools) == 12,
            f"实际 {len(tools)}: {tools}")
     for name in expected:
         _check(f"已注册 {name}", name in tools)
@@ -158,6 +165,77 @@ def main() -> int:
     finally:
         try:
             _ASR_FIXTURE.unlink()
+        except Exception:
+            pass
+
+    # 4c. SAM3 检测 / 分割（图片）—— 开放词汇：用文字找东西
+    print("\n[4c] image_segmentation_sam3（图片）")
+    _SAM3_IMG = "ASSETS/PROPS/01_paper_plane/paper_plane_hero_v01.png"
+    res, wf = call(srv.image_segmentation_sam3,
+                   image=_SAM3_IMG,
+                   prompt="paper plane:2, boy", threshold=0.4, refine_iterations=1)
+    _check("提交成功 / mode=image",
+           res.get("ok") is True and res.get("mode") == "image", str(res)[:300])
+    _check("LoadImage 注入输入图", inputs_of(wf, "LoadImage")[0]["image"] == "ref_test.png")
+    _check("prompt 注入 CLIPTextEncode",
+           inputs_of(wf, "CLIPTextEncode")[0]["text"] == "paper plane:2, boy")
+    det = inputs_of(wf, "SAM3_Detect")[0]
+    _check("threshold/refine_iterations/individual_masks 注入 SAM3_Detect",
+           det["threshold"] == 0.4 and det["refine_iterations"] == 1
+           and det["individual_masks"] is False)
+    _check("PreviewImage 转为 SaveImage（_bbox 后缀）",
+           not inputs_of(wf, "PreviewImage")
+           and any(s["filename_prefix"].endswith("_bbox")
+                   for s in inputs_of(wf, "SaveImage")))
+    overlay_ids = [k for k, n in wf.items() if n.get("class_type") == "ImageAndMaskPreview"]
+    _check("叠加图 SaveImage 挂在 ImageAndMaskPreview 的 composite 上",
+           wf.get("mcp_save_overlay", {}).get("inputs", {}).get("images") == [overlay_ids[0], 0],
+           str(wf.get("mcp_save_overlay")))
+    det_ids = [k for k, n in wf.items() if n.get("class_type") == "SAM3_Detect"]
+    _check("MaskToImage 接 SAM3_Detect 的 masks 输出",
+           wf.get("mcp_mask_to_image", {}).get("inputs", {}).get("mask") == [det_ids[0], 0],
+           str(wf.get("mcp_mask_to_image")))
+    _check("原始掩膜落成 SaveImage（_mask 后缀）",
+           wf.get("mcp_save_mask", {}).get("inputs", {}).get("images")
+           == ["mcp_mask_to_image", 0]
+           and wf["mcp_save_mask"]["inputs"]["filename_prefix"].endswith("_mask"))
+    _check("单图模式顶层平铺 files / detected / mask_coverage",
+           "files" in res and "detected" in res and "mask_coverage" in res, str(res)[:300])
+    res, wf = call(srv.image_segmentation_sam3,
+                   image=_SAM3_IMG,
+                   prompt="boy", individual_masks=True)
+    _check("individual_masks=True 时跳过原始掩膜分支（0 检出会让 SaveImage 崩）",
+           "mcp_mask_to_image" not in wf and "mcp_save_overlay" in wf, str(list(wf))[:200])
+    bad = json.loads(srv.image_segmentation_sam3(image=_SAM3_IMG, threshold=1.5))
+    _check("非法 threshold 被拒绝", bad.get("ok") is False, str(bad))
+    bad = json.loads(srv.image_segmentation_sam3(image=_SAM3_IMG, video_frames=99))
+    _check("非法 video_frames 被拒绝", bad.get("ok") is False, str(bad))
+
+    # 4d. SAM3 检测（视频 → 均匀抽帧，逐帧检测）
+    print("\n[4d] image_segmentation_sam3（视频抽帧）")
+    _VIDEO_FIXTURE.parent.mkdir(parents=True, exist_ok=True)
+    _VIDEO_FIXTURE.write_bytes(b"\x00\x00\x00\x18ftypmp42")   # 占位内容（抽帧已被桩替换）
+    try:
+        res, wf = call(srv.image_segmentation_sam3, image=str(_VIDEO_FIXTURE),
+                       prompt="paper plane", video_frames=3)
+        _check("mode=video 且逐帧返回 3 帧",
+               res.get("ok") is True and res.get("mode") == "video"
+               and len(res.get("frames", [])) == 3, str(res)[:300])
+        _check("逐帧时间戳 / 帧图路径齐全",
+               all(f.get("time_sec") is not None and f.get("frame_image")
+                   for f in res["frames"]), str(res["frames"])[:200])
+        _check("summary 统计齐全",
+               res.get("summary", {}).get("frames") == 3
+               and "detected_frames" in res["summary"], str(res.get("summary")))
+        _check("视频模式顶层不重复平铺 files", "files" not in res, str(list(res))[:200])
+        # wf 是最后一帧（index=2）提交的内容 ⇒ 前缀应带 _f02
+        _check("逐帧保存前缀带帧号",
+               any(s["filename_prefix"].endswith("_f02_bbox")
+                   for s in inputs_of(wf, "SaveImage")),
+               str([s["filename_prefix"] for s in inputs_of(wf, "SaveImage")]))
+    finally:
+        try:
+            _VIDEO_FIXTURE.unlink()
         except Exception:
             pass
 
