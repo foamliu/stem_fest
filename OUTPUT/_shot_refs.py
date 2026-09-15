@@ -47,18 +47,53 @@ def parse_script(path):
     """
     txt = open(path, encoding="utf-8").read()
 
-    # ① 常量表：NAME = "ASSETS/..." 或 NAME = os.path.join(...)
+    # ① 常量表：NAME = "ASSETS/..." 或 os.path.join(变量, "...")
+    #    ★ 必须**多轮迭代**：因为存在 CHAR_DIR -> os.path.join(ASSETS,"CHARACTERS")
+    #      而 G_FOUR = os.path.join(CHAR_DIR, "_group", "x.png") 的嵌套引用。
     consts = {}
-    for m in re.finditer(r'^([A-Z][A-Z0-9_]{2,})\s*=\s*"([^"]+)"', txt, re.M):
+    # 支持  ROOT = "..."  /  ROOT = r"E:\code\..."  （原始字符串前缀 r/R）
+    for m in re.finditer(r'^([A-Z][A-Z0-9_]{2,})\s*=\s*[rR]?"([^"]+)"', txt, re.M):
         consts[m.group(1)] = m.group(2)
-    # 也支持  NAME = os.path.join(ROOT, "ASSETS", ...) 形式
-    for m in re.finditer(r'^([A-Z][A-Z0-9_]{2,})\s*=\s*os\.path\.join\(([^)]+)\)',
-                         txt, re.M):
-        parts = re.findall(r'"([^"]+)"', m.group(2))
-        if parts and parts[0].upper() == "ROOT":
-            consts[m.group(1)] = "/".join(parts[1:])
-        elif parts:
-            consts[m.group(1)] = "/".join(parts)
+
+    def try_join(name, args_str):
+        """把 os.path.join(a, "b", VAR, "c") 解析成**相对项目根的路径**。
+
+        ROOT 的值可能是绝对路径（E:\\code\\stem_fest），此时把它之后的部分
+        当作相对路径返回，由调用方用 os.path.join(BASE, rel) 还原。
+        """
+        parts = re.findall(r'"([^"]*)"|([A-Za-z_][A-Za-z0-9_]*)', args_str)
+        segs, saw_root = [], False
+        for lit, ident in parts:
+            if lit:
+                segs.append(lit)
+            elif ident:
+                if ident.upper() == "ROOT":
+                    saw_root = True
+                elif ident in consts:
+                    v = consts[ident].replace(os.sep, "/")
+                    # 常量本身若含项目根绝对路径，剥掉前缀
+                    rp = consts.get("ROOT", "").replace(os.sep, "/")
+                    if rp and v.startswith(rp):
+                        v = v[len(rp):].strip("/")
+                        saw_root = True
+                    segs.append(v)
+                else:
+                    return None   # 有未解析变量 ⇒ 放弃
+        return "/".join(s.strip("/") for s in segs if s)
+
+    joins = list(re.finditer(
+        r'^([A-Z][A-Z0-9_]{2,})\s*=\s*os\.path\.join\(([^)]*)\)', txt, re.M))
+    for _ in range(4):                      # 迭代展开嵌套引用
+        progressed = False
+        for m in joins:
+            if m.group(1) in consts:
+                continue
+            got = try_join(m.group(1), m.group(2))
+            if got:
+                consts[m.group(1)] = got
+                progressed = True
+        if not progressed:
+            break
 
     def resolve(token):
         """把 ref 值解析成路径：字面量 / 常量名 / None。"""
@@ -114,12 +149,16 @@ def main():
         print("%-24s -> %d 镜" % (s, len(got)))
         allshots.update(got)
 
-    # 归一化参考图路径（脚本里写的是相对 ROOT）
+    # 归一化参考图路径（脚本里写的是相对 ROOT 或含 ROOT 绝对前缀）
     for n, v in allshots.items():
         norm = []
         for r in v["refs"]:
-            rp = r.replace("/", os.sep)
-            ap = rp if os.path.isabs(rp) else os.path.join(ROOT, rp)
+            rp = r.replace("\\", "/")
+            # 去掉项目根的绝对前缀（如 E:/code/stem_fest/）
+            base = ROOT.replace("\\", "/")
+            if rp.lower().startswith(base.lower()):
+                rp = rp[len(base):].strip("/")
+            ap = os.path.join(ROOT, *rp.split("/"))
             norm.append(ap)
             if not os.path.exists(ap):
                 print("   !! 镜 %d 参考图不存在：%s" % (n, rp))

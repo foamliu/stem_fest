@@ -19,6 +19,7 @@
 """
 import argparse
 import os
+import subprocess
 import sys
 
 from PIL import Image
@@ -83,6 +84,32 @@ MARGIN = 24    # 画布四周留白（像素）
 BG = (24, 26, 30)  # 深灰底，避免纯黑与人物头发糊在一起
 MAX_H = 1200   # 单个人像的归一化高度上限，防止超宽图
 
+# ★ 人脸体检（2026-09-15 加）：拼完统一量一次"脸高 px"。
+#   依据：README §4.2「输出画面脸高 ≥ 250 px」；参考图同理 —— 缩到 1 MP 后脸太小，
+#   R2V 就没法还原长相（已实锤案例：liu_siqi_hero_v01 原图 205 px → 1 MP 后 112 px → 不像本人）。
+#   实现：调 OUTPUT/_face_identity.py（跑在 ComfyUI venv，它才有 insightface）；
+#   **只告警、不阻断**，可 --no-face-check 跳过。
+FACE_TOOL = os.path.join(ROOT, "OUTPUT", "_face_identity.py")
+FACE_MIN_PX = 250
+
+
+def face_check(paths, min_px=FACE_MIN_PX):
+    """拼版产物的人脸体检（非致命）。"""
+    if not paths:
+        return
+    print("\n[face-check] 体检 %d 张新产物（阈值：1MP 后脸高 >= %d px）…" % (len(paths), min_px))
+    try:
+        r = subprocess.run([sys.executable, FACE_TOOL, "check", *paths,
+                            "--min-face-px", str(min_px)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except Exception as e:
+        print("[face-check] 跳过：%s" % e)
+        return
+    for line in (r.stdout or "").strip().splitlines():
+        print("[face-check] " + line)
+    if r.returncode not in (0,):
+        print("[face-check] 体检异常（退出码 %s）：%s" % (r.returncode, (r.stderr or "")[-200:]))
+
 # ★ 例外：这组**不要用拼版覆盖** —— 现行图是用户提供的宽幅真人合影（v02），质量优于拼版。
 #     key = slug，value = 现行文件名（相对 _group/）。脚本对它们只报告、不写文件。
 KEEP_USER_SUPPLIED = {
@@ -128,6 +155,8 @@ def main():
     ap.add_argument("--all", action="store_true", help="生成全部组合 + 全部单人图")
     ap.add_argument("--list", action="store_true", help="只列清单，不写文件")
     ap.add_argument("--force", action="store_true", help="覆盖已存在的产物")
+    ap.add_argument("--no-face-check", action="store_true",
+                    help="拼完不做人脸体检（默认会量脸高并告警）")
     args = ap.parse_args()
 
     if not os.path.isdir(CROPS):
@@ -150,6 +179,7 @@ def main():
         targets = list(COMBOS.items())
 
     ok = skip = keep = fail = 0
+    written = []
     for slug, names in targets:
         out = os.path.join(GROUP, slug + "_hero_v01.png")
         tag = "%-38s" % slug
@@ -180,6 +210,10 @@ def main():
               % (tag, im.width, im.height,
                  os.path.getsize(out) / 1024.0 / 1024.0, " + ".join(names)))
         ok += 1
+        written.append(out)
+
+    if not args.no_face_check:
+        face_check(written)
 
     print("\n合计：OK %d / SKIP %d / KEEP %d / FAIL %d → %s" % (ok, skip, keep, fail, GROUP))
     return 1 if fail else 0

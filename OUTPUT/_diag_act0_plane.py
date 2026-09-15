@@ -94,33 +94,54 @@ LATE_MARK = "（后期）"
 
 
 def strip_late_audio(text):
-    """把「…（后期）」这类后期音效从句子里剔除，只留 L1 台词给 H3。"""
+    """把「…（后期）」这类后期音效从句子里剔除，只留 L1 台词给 H3。
+
+    句子边界 = `；` `。` 或换行；含 LATE_MARK 的那句整句丢掉。
+
+    ★ 2026-09-16 关键修复（去字幕泄漏，README §6.6b）：
+      旧实现用 `_re.split(r"(?<=[；。])|\n", text)` 切句后 **无条件 join**，
+      把原文的 `\n` 段落分隔符一起吃掉 ⇒ 多行 prompt 被压成一整行，
+      `Audio:` 前缀与紧跟其后的 `（后期）` 句同归于尽，
+      于是「★ 全画面不得出现任何可读的文字…」与台词**粘连成同一句**，
+      H3 便把台词当画面字幕渲染（镜 14 实测：改 prompt 后 8/8 帧仍泄漏）。
+      现改为 **按行处理、保留换行**：行内含 LATE_MARK 的句子才丢，`\n` 一律保留。
+    """
     import re as _re
-    out = []
-    for sent in _re.split(r"(?<=[；。])|\n", text):
-        if LATE_MARK in sent:
-            continue
-        out.append(sent)
-    return "".join(out).strip()
+    lines = []
+    for line in text.split("\n"):
+        kept = [s for s in _re.split(r"(?<=[；。])", line) if LATE_MARK not in s]
+        lines.append("".join(kept))
+    return "\n".join(lines).strip()
 
 
 TASKS = {}
 
 # ── 镜 1 校门口：小女孩 + 妈妈（序幕一开篇；★ 校园展示镜）──
+# ★ 2026-09-15 修复「校名乱码」：旧写法写「校牌清晰可见、完整入画」，
+#   H3 于是把墙面当成大招牌、**在墙上写大字**，写出「汇月?舱学校 / Aue…Scoule」。
+#   实际参考图（school_gate_wide_v02.png）里校名是**门柱上的竖排小牌子**（约 6px 字高），
+#   H3 根本抄不动 ⇒ 只能编字。
+#   ✅ 正解：①**不要求画面出现文字**（校名展示由后期贴字保证）
+#            ②把「校牌」改成**建筑特征描述**（竖排铭牌、红色圆形校徽），
+#              让 H3 画「一块牌子」而不是「一行字」
+#            ③明示**不要出现任何可读文字/招牌字样**
 TASKS[1] = dict(
     slug="girl_mother_at_school_gate", seed=9101,
     ref1=G_GIRL_MOTHER, ref2=SCENE_GATE, dur=3.0,
     prompt=(
         "CUT 1: 全景镜头。一位三十多岁的母亲牵着五岁小女孩的手，站在学校大门口前，"
-        "小女孩仰头看着校门上的校牌、眼睛亮亮的，母亲低头含笑看着她；"
-        "校牌清晰可见、完整入画；"
-        "两人的面貌、发型与服装严格照 <Picture 1>（**不要改变长相与年龄**）；"
-        "背景是 <Picture 2> 那所学校正门口的实景；"
+        "小女孩仰头看着校门上方、眼睛亮亮的，母亲低头含笑看着她；"
+        "背景是 <Picture 2> 那所学校正门口的实景：米黄色墙面、竖条纹装饰墙、"
+        "深色金属大门与门柱、门柱上有一块小小的竖排铭牌与红色圆形校徽（仅有装饰性色块与图案，"
+        "看不到任何可以辨认的字母或笔画）；"
+        "两人的面貌、发型与服装严格照 <Picture 1>（不要改变长相与年龄）；"
+        "★ 全画面不得出现任何可读的文字、招牌字样、英文单词或字幕；"
         + LIGHT + "。固定机位，只留轻微手持呼吸感。\n"
         "Audio: 校门口的环境音，微风、远处隐约的校园喧闹声（后期）；"
         "小女孩仰头、清脆地说：妈妈，这个学校好漂亮！"
     ),
 )
+
 
 # ── 镜 2 妈妈低头看她（近景）──
 TASKS[2] = dict(
@@ -128,8 +149,8 @@ TASKS[2] = dict(
     ref1=G_GIRL_MOTHER, ref2=SCENE_GATE, dur=4.0,
     prompt=(
         "CUT 1: 近景镜头。母亲笑着低下头看身边的小女孩，眼神温柔；"
-        "小女孩在画面里只入画一部分（侧脸或后脑勺），**不要让她消失**；"
-        "两人的面貌、发型与服装严格照 <Picture 1>（**不要改变长相与年龄**）；"
+        "小女孩在画面里只入画一部分（侧脸或后脑勺），不要让她消失；"
+        "两人的面貌、发型与服装严格照 <Picture 1>（不要改变长相与年龄）；"
         "背景是 <Picture 2> 那所学校正门口的实景、略微虚化；"
         + LIGHT + "。固定机位。\n"
         "Audio: 校门口环境音（后期）；母亲温和地说：那你明年就可以来这儿读书了。"
@@ -143,8 +164,8 @@ TASKS[3] = dict(
     prompt=(
         "CUT 1: 中景镜头。小女孩右手捏着一架白色纸飞机，先凑到嘴边哈了一口气，"
         "然后手臂用力向前一甩，把纸飞机朝校门方向掷出去，动作干脆、表情兴奋；"
-        "母亲站在她身旁看着、含笑**（不要让她消失）**；纸飞机的形态照 <Picture 2>；"
-        "人物的面貌、发型与服装严格照 <Picture 1>（**不要改变长相与年龄**）；"
+        "母亲站在她身旁看着、含笑（不要让她消失）；纸飞机的形态照 <Picture 2>；"
+        "人物的面貌、发型与服装严格照 <Picture 1>（不要改变长相与年龄）；"
         + LIGHT + "。固定机位，甩手瞬间镜头轻微跟随。\n"
         "Audio: 纸飞机出手时的破风声（后期）；"
         "小女孩用力喊：飞喽——！"
@@ -157,8 +178,8 @@ TASKS[4] = dict(
     ref1=None, ref2=None, dur=7.0,
     prompt=(
         "CUT 1: 远景航拍跟拍镜头，画面前景是一架正在滑翔的白色纸飞机，"
-        "镜头一路跟随它向前飞过学校校园：先掠过操场（**有学生在上体育课**），"
-        "再穿过林荫道（**树影斑驳、阳光透过树叶**），接着掠过花坛（**花正开着**），"
+        "镜头一路跟随它向前飞过学校校园：先掠过操场（有学生在上体育课），"
+        "再穿过林荫道（树影斑驳、阳光透过树叶），接着掠过花坛（花正开着），"
         "最后飞向一栋教学楼四楼的窗口。四个地点依次呈现、每个约 1.5-2 秒，"
         "让观众看清校园的操场、林荫道、花坛与教学楼；"
         + LIGHT + "。镜头持续向前推进，画面持续变化、运动感强。\n"
@@ -171,9 +192,9 @@ TASKS[5] = dict(
     slug="zhang_shuyang_catches_plane", seed=9105,
     ref1=G_FOUR, ref2=SCENE_CLASS, dur=4.0,
     prompt=(
-        "CUT 1: 全景镜头。一架白色纸飞机从教室的窗户飞进来，**窗外可见校园的一角（操场与树）**；"
+        "CUT 1: 全景镜头。一架白色纸飞机从教室的窗户飞进来，窗外可见校园的一角（操场与树）；"
         "窗内一位初中男生迅速伸出两根手指，在纸飞机掠过时把它稳稳捏住；"
-        "**教室里另外三位同学都在画面里，安静地看着这一幕**；"
+        "教室里另外三位同学都在画面里，安静地看着这一幕；"
         "四人的面貌、发型与服装严格照 <Picture 1>；"
         "背景是 <Picture 2> 那间午后的教室：米色课桌椅、蓝色墙报、明亮的窗户；"
         + LIGHT + "。镜头跟移着纸飞机从窗口进入教室，最后停在男生指间。\n"
@@ -188,7 +209,7 @@ TASKS[6] = dict(
     prompt=(
         "CUT 1: 中近景镜头。一位初中男生用两根手指捏着白色纸飞机举到眼前，"
         "手腕左右晃了晃、头微微一歪、挑起一边眉毛，眼神在教室里扫了一圈、嘴角挂着得意又挑衅的笑；"
-        "**身后和身旁还站着另外三位同学，他们看着他、不说话，只入画一部分**；"
+        "身后和身旁还站着另外三位同学，他们看着他、不说话，只入画一部分；"
         "四人的面貌、发型与服装严格照 <Picture 1>；"
         "背景是 <Picture 2> 那间午后的教室，明亮的自然光；"
         + LIGHT + "。镜头轻微向前缓推（slow dolly in）。\n"
@@ -198,21 +219,29 @@ TASKS[6] = dict(
 )
 
 # ── 镜 7 刘思齐看书 / 徐畅景看他一眼（三人合影，镜 7） ──
+# ★ 2026-09-15 修复「星号+文字被渲染成字幕」：
+#   旧写法 `**头也不抬**` 被 H3 画成画面文字 `** 也不抬` —— ★★ **Markdown 加粗标记
+#   本身也是画面内容**（不只是文字会被画，`**` 也一起被画）。
+#   ⇒ 本条与「镜 1 校名」同类（见 README §6.9）：**画面段凡是"会被当成可读文本"的字符串，
+#     都有概率被渲染**。加粗强调只用于**给 Agent 自己看**的语义，不该出现在画面段
+#     （画面段的字 H3 全都看得见）。
 TASKS[7] = dict(
     slug="xu_changjing_liu_siqi_glance", seed=9107,
     ref1=G_SIQI_ZHANG_XU, ref2=SCENE_CLASS, dur=3.0,
     prompt=(
         "CUT 1: 中景三人镜头，三人处于同一光照环境、是一个完整连续的空间："
-        "左边一位戴细框眼镜的女生低头看书、**头也不抬**；"
+        "左边一位戴细框眼镜的女生低头看着摊开的书，从头到尾没有抬头；"
         "中间那位男生举着纸飞机；右边一位男生侧过头，看了举纸飞机的男生一眼，"
         "表情是淡淡的不以为然；"
-        "三人的面貌、发型、眼镜与服装严格照 <Picture 1>（**细框眼镜必须保留**）；"
+        "三人的面貌、发型、眼镜与服装严格照 <Picture 1>，细框眼镜必须保留；"
         "背景是 <Picture 2> 那间午后的教室；"
+        "★ 全画面不得出现任何可读的文字、字幕或符号。"
         + LIGHT + "。固定机位，镜头轻微横移。\n"
         "Audio: 教室底噪、书页翻动声（后期）；"
         "右边的男生淡淡地说：你少自恋了。"
     ),
 )
+
 
 # ── 镜 8 刘思成拿过纸飞机放在桌角（中近景）──
 TASKS[8] = dict(
@@ -221,8 +250,8 @@ TASKS[8] = dict(
     prompt=(
         "CUT 1: 中近景镜头。一位戴细框眼镜的初中女生伸出手，把男生手里的纸飞机拿过来，"
         "随手放在课桌角上，动作自然；"
-        "**身后和身旁还站着另外三位同学，他们看着她、只入画一部分**；"
-        "四人的面貌、发型、眼镜与服装严格照 <Picture 1>（**细框眼镜必须保留**）；"
+        "身后和身旁还站着另外三位同学，他们看着她、只入画一部分；"
+        "四人的面貌、发型、眼镜与服装严格照 <Picture 1>（细框眼镜必须保留）；"
         "背景是 <Picture 2> 那间午后的教室；"
         + LIGHT + "。固定机位，镜头轻微下摇跟着她的手。\n"
         "Audio: 教室底噪、纸张轻响（后期）；"
@@ -332,8 +361,14 @@ def build_video_wf(task, ref1_name, ref2_name, megapixels, steps, prefix):
     return wf, kind, n_load
 
 
-def wait_for(prompt_id, timeout):
-    """轮询 /history 直到出现 outputs 或 error。返回 (entry, status)。"""
+def wait_for(prompt_id, timeout, resume=None):
+    """轮询 /history 直到出现 outputs 或 error。返回 (entry, status)。
+
+    ★ 断点续等（LESSONS #13）：终端中断（KeyboardInterrupt / 会话超时）只是
+      断开了「轮询」，ComfyUI 侧的生成照常在跑，prompt 也仍留在 /history 里。
+      ⇒ 中断后**绝不能重跑**（白烧一次 5-15 分钟 + 额度），应带 --resume 回来接着等。
+     resume : 已有的中间态 entry（dict）或 None；若已有 outputs 则立即返回。
+    """
     t0 = time.time()
     last = ""
     while time.time() - t0 < timeout:
@@ -341,7 +376,7 @@ def wait_for(prompt_id, timeout):
             h = _api("/history/" + prompt_id)
         except Exception:
             h = {}
-        entry = h.get(prompt_id)
+        entry = h.get(prompt_id) or resume
         if entry:
             st = (entry.get("status") or {}).get("status_str")
             if (entry.get("outputs") or st == "error") and st != "running":
@@ -357,7 +392,7 @@ def wait_for(prompt_id, timeout):
             print(line, flush=True)
             last = line
         time.sleep(15)
-    return None, "timeout"
+    return entry, "timeout"
 
 
 
@@ -387,6 +422,52 @@ def probe(path):
         return info
     except Exception as e:
         return dict(error=str(e)[:200])
+
+
+def adopt(prompt_id, shot, dt_note=""):
+    """★ 断点恢复（LESSONS #13）：不重新提交，直接收养 /history 里已有的 prompt_id。
+
+    用途：上一次轮询被终端中断，但 ComfyUI 已把生成跑完 / 仍在跑。
+    本函数只做「取回 + 落盘 + ffprobe 校验」，一次 GPU 都不烧。
+    """
+    task = dict(TASKS[shot])
+    print("=" * 72)
+    print("[镜 %d] %s | 收养已提交任务 prompt_id=%s" % (shot, task["slug"], prompt_id))
+    entry, st = wait_for(prompt_id, timeout=1800)
+    if entry is None:
+        print("  [!] /history 里查不到该 prompt_id（可能已被清理）")
+        return (shot, "NOT_FOUND", prompt_id)
+    if st == "error":
+        msg = json.dumps(entry.get("status", {}), ensure_ascii=False)[:600]
+        print("  [X] 该任务执行报错：%s" % msg)
+        return (shot, "ERROR", msg[:200])
+    return _collect(shot, entry, 0.0)
+
+
+def _collect(shot, entry, dt):
+    """把 history entry 里的产物落盘 + 校验（run_shot / adopt 共用）。"""
+    files = []
+    for node_out in entry.get("outputs", {}).values():
+        for key in ("videos", "gifs", "images", "audio"):
+            for it in node_out.get(key) or []:
+                src = os.path.join(COMFY_OUT, it.get("subfolder", ""), it["filename"])
+                if not os.path.exists(src):
+                    continue
+                dst = os.path.join(OUT_ROOT, it["filename"])
+                shutil.copy2(src, dst)
+                v = probe(dst)
+                flag = "OK" if "error" not in v and v.get("w") else "SUSPECT"
+                extra = ("%sx%s %s | %.2fs %s %sHz %sch | %.0fKB" % (
+                    v.get("w"), v.get("h"), v.get("vcodec", "?"),
+                    v.get("duration", -1), v.get("acodec", "无音轨"),
+                    v.get("sr", "-"), v.get("ch", "-"), v.get("kb", 0))
+                    ) if "error" not in v else v["error"]
+                print("  [%s] %s  %s  %.0f s" % (flag, it["filename"], extra, dt))
+                files.append((it["filename"], flag, extra))
+    if not files:
+        print("  [!] history 里没有输出文件（可能仍在跑）")
+        return (shot, "NO_OUTPUT", "")
+    return (shot, files[0][1], "%s | %s" % (files[0][0], files[0][2]))
 
 
 def run_shot(shot, dry=False, megapixels=0.6, steps=20, timeout=3600):
@@ -439,39 +520,23 @@ def run_shot(shot, dry=False, megapixels=0.6, steps=20, timeout=3600):
     dt = time.time() - t0
     if entry is None:
         print("  [!] 等待超时（任务可能仍在跑）prompt_id=%s" % pid)
+        print("      ★ 断点续等：py _diag_act0_plane.py --resume=%s %d" % (pid, shot))
         return (shot, "TIMEOUT", pid)
     if st == "error":
         msg = json.dumps(entry.get("status", {}), ensure_ascii=False)[:600]
         print("  [X] 执行报错：%s" % msg)
         return (shot, "ERROR", msg[:200])
-
-    files = []
-    for node_out in entry.get("outputs", {}).values():
-        for key in ("videos", "gifs", "images", "audio"):
-            for it in node_out.get(key) or []:
-                src = os.path.join(COMFY_OUT, it.get("subfolder", ""), it["filename"])
-                if not os.path.exists(src):
-                    continue
-                dst = os.path.join(OUT_ROOT, it["filename"])
-                shutil.copy2(src, dst)
-                v = probe(dst)
-                flag = "OK" if "error" not in v and v.get("w") else "SUSPECT"
-                extra = ("%sx%s %s | %.2fs %s %sHz %sch | %.0fKB" % (
-                    v.get("w"), v.get("h"), v.get("vcodec", "?"),
-                    v.get("duration", -1), v.get("acodec", "无音轨"),
-                    v.get("sr", "-"), v.get("ch", "-"), v.get("kb", 0))
-                    ) if "error" not in v else v["error"]
-                print("  [%s] %s  %s  %.0f s" % (flag, it["filename"], extra, dt))
-                files.append((it["filename"], flag, extra))
-    if not files:
-        print("  [!] history 里没有输出文件（可能被中断）")
-        return (shot, "NO_OUTPUT", pid)
-    return (shot, files[0][1], "%s | %s" % (files[0][0], files[0][2]))
+    return _collect(shot, entry, dt)
 
 
 def main():
     args = sys.argv[1:]
     dry = "--dry" in args
+    # ★ 断点恢复：--resume=<prompt_id> 收养上次被中断轮询的任务（不重新提交、不烧 GPU）
+    resume = None
+    for a in sys.argv[1:]:
+        if a.startswith("--resume="):
+            resume = a.split("=", 1)[1]
     args = [a for a in args if not a.startswith("--")]
     # 本幕默认 10：镜 4（航拍跟拍）/ 镜 5（飞入窗）为环境剧变镜，建议单独 --steps=20；
     # 镜 2/3/7/8/9 静态或对话镜可 --steps=4 提速
@@ -483,6 +548,17 @@ def main():
         elif a.startswith("--mp="):
             mp = float(a.split("=", 1)[1])
     shots = [int(a) for a in args] if args else sorted(TASKS)
+
+    if resume:
+        if not shots:
+            print("[X] --resume 必须同时给出镜号，例：--resume=<pid> 7")
+            return
+        print(">>> RESUME prompt_id=%s shots=%s" % (resume, shots))
+        for shot in shots:
+            row = adopt(resume, shot)
+            print("  镜 %-2d  %-12s %s" % row)
+        return
+
     print(">>> steps=%d megapixels=%.2f shots=%s" % (steps, mp, shots))
 
     os.makedirs(OUT_ROOT, exist_ok=True)
