@@ -1,0 +1,53 @@
+{
+  "1": {
+    "inputs": { "ckpt_name": "stable_audio_3_medium.safetensors" },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "Stable Audio 3 Medium（MODEL + VAE）" }
+  },
+  "2": {
+    "inputs": { "clip_name": "t5gemma_b_b_ul2.safetensors", "type": "stable_audio", "device": "default" },
+    "class_type": "CLIPLoader",
+    "_meta": { "title": "T5-Gemma 文本编码器（stable_audio）" }
+  },
+  "3": {
+    "inputs": { "text": "short punchy sound effect of a paper plane whooshing past, clean recording", "clip": ["2", 0] },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "正向提示词（音效描述）" }
+  },
+  "4": {
+    "inputs": { "text": "", "clip": ["2", 0] },
+    "class_type": "CLIPTextEncode",
+    "_meta": { "title": "负向提示词" }
+  },
+  "5": {
+    "inputs": { "seconds": 8.0, "batch_size": 1 },
+    "class_type": "EmptyLatentAudio",
+    "_meta": { "title": "音频长度（秒）" }
+  },
+  "6": {
+    "inputs": {
+      "seed": 12345,
+      "steps": 8,
+      "cfg": 1.0,
+      "sampler_name": "lcm",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": ["1", 0],
+      "positive": ["3", 0],
+      "negative": ["4", 0],
+      "latent_image": ["5", 0]
+    },
+    "class_type": "KSampler",
+    "_meta": { "title": "K采样器（LCM / 8 步 / CFG 1）" }
+  },
+  "7": {
+    "inputs": { "samples": ["6", 0], "vae": ["1", 2] },
+    "class_type": "VAEDecodeAudio",
+    "_meta": { "title": "VAE 解码（音频）" }
+  },
+  "8": {
+    "inputs": { "audio": ["7", 0], "filename_prefix": "sfx/stable_audio_3", "quality": "V0" },
+    "class_type": "SaveAudioMP3",
+    "_meta": { "title": "保存 MP3" }
+  }
+}

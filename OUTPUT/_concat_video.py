@@ -58,11 +58,22 @@ def probe(p):
 
 
 def collect(upto=None):
-    """按镜号收集产物：{镜号: 路径}（同号取 mtime 最新的）"""
+    """按镜号收集产物：{镜号: 路径}（同号取 mtime 最新的）
+
+    ⚠️ 必须排除：
+      · `_bak_*`（擦除/重跑前的备份）
+      · `_rejected/` 子目录（镜 14 多 seed 择优后的落选版本）
+      · `*_delogo.mp4` / `*_temporal.mp4` / `*_split.mp4`（失败的临时文件）
+    """
     found = {}
     for d in DIRS:
         for f in glob.glob(os.path.join(ROOT, "OUTPUT", d, "video", "*.mp4")):
-            m = re.match(r"(\d+)_", os.path.basename(f))
+            base = os.path.basename(f)
+            if base.startswith("_bak_"):
+                continue
+            if re.search(r"_(delogo|temporal|split)\.mp4$", base):
+                continue
+            m = re.match(r"(\d+)_", base)
             if not m:
                 continue
             n = int(m.group(1))

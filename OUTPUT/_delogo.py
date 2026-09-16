@@ -30,9 +30,10 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "OUTPUT")
+sys.path.insert(0, OUT)
+import _subbox_coords as COORDS          # noqa: E402  ★ 手工定框表
 
-# 默认字幕框。依据 `_scan_subtitles.py` 拼图观测：泄漏字幕在**画面 78–86% 高度**、
-# 水平居中；本片镜为 1056x608。
+# 兜底默认框（未登记镜用）。依据观测：泄漏字幕多在画面 78–86% 高度、水平居中。
 BOX_W, BOX_H, BOX_Y = 470, 46, 478
 
 
@@ -63,11 +64,17 @@ TEXT = {
 
 
 def newest(act, slug):
-    """取该镜**最新**的 mp4（与 `_concat_video.py` 同一套规则：按 mtime）。"""
+    """取该镜**最新**的 mp4（与 `_concat_video.py` 同一套规则：按 mtime）。
+
+    ⚠️ 必须排除 `_bak_*`（备份）与 `*_delogo.mp4`（上次擦除失败留下的空临时文件），
+       否则会把损坏文件当"最新片"。
+    """
     d = os.path.join(OUT, act, "video")
     cands = []
     for f in os.listdir(d):
         if f.startswith("_bak_"):
+            continue
+        if "_delogo.mp4" in f:
             continue
         if re.match(r"^\d+_%s_\d+_.*\.mp4$" % re.escape(slug), f):
             cands.append((os.path.getmtime(os.path.join(d, f)), f))
@@ -150,8 +157,12 @@ def main():
             print("✗ 镜 %-3d 找不到视频（%s/%s）" % (n, act, slug))
             continue
         wh = probe_size(src)
-        box = box_override or custom or _box()
+        # 框优先级：命令行 --box > 手工定框表 > 兜底默认
+        box = box_override or COORDS.get(n) or custom or _box()
         print("[镜 %-3d] %s  %s" % (n, os.path.basename(src), wh))
+        print("   框来源：%s" % ("命令行 --box" if box_override
+                              else ("手工定框表" if COORDS.get(n)
+                                    else "兜底默认")))
 
         if preview:
             made = do_preview(src, box, os.path.join(pv_dir, "s%03d.jpg" % n))

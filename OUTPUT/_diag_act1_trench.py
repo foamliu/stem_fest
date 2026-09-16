@@ -171,7 +171,7 @@ TASKS = {}
 
 TASKS[19] = dict(
     slug="trench_wide_four_and_soldiers", seed=9700,
-    ref1=G_FOUR_SOLDIERS, ref2=SCENE, dur=6.0,
+    ref1=G_FOUR_SOLDIERS, ref2=SCENE, dur=4.0,
     prompt=(
         "CUT 1: 全景镜头。一条被炸松土的朝鲜战场交通壕，画面里一共有五个人："
         "四位穿白色短袖 Polo 衫、系红领巾的初中生站在交通壕里，"
@@ -207,8 +207,7 @@ TASKS[21] = dict(
         "右边那位（男生，不戴眼镜）站在他身后侧；"
         "两人的面貌、发型与服装严格照 <Picture 1>；"
         "背景是 <Picture 2> 那条灰蒙蒙的战前交通壕，土壁上长着稀稀拉拉的野菜野草；"
-        + LIGHT + "。镜头固定，随后轻微下摇（slight tilt down）落到那丛野菜上。\n"
-        "★ 全画面不得出现任何可读的文字、字幕或符号。\n"
+        + LIGHT + "。镜头固定，随后轻微下摇（slight tilt down）落到那丛野菜上；★ 全画面不得出现任何可读的文字、字幕或符号。画面上没有任何文字、字幕或标识，人物脸上只有表演。\n"
         "Audio: 风声（后期）；蹲着的男生问：这野菜能吃吗？"
     ),
 )
@@ -229,7 +228,7 @@ TASKS[22] = dict(
 
 TASKS[23] = dict(
     slug="huang_shares_wild_veg_with_young_soldier", seed=9704,
-    ref1=G_YOUNG_SOL_HUANG, ref2=SCENE, dur=6.0,
+    ref1=G_YOUNG_SOL_HUANG, ref2=SCENE, dur=3.0,
     prompt=(
         "CUT 1: 中景三人镜头，三人蹲在交通壕里同一处、处于同一光照环境、"
         "画面是一个完整连续的空间：中间那位（穿军绿色立领军装、戴红星军帽的年轻战士）"
@@ -305,7 +304,7 @@ TASKS[27] = dict(
 
 TASKS[28] = dict(
     slug="sicheng_nods_2026", seed=9709,
-    ref1=G_SICHENG_HUANG, ref2=SCENE, dur=3.0,
+    ref1=G_SICHENG_HUANG, ref2=SCENE, dur=2.0,
     prompt=(
         "CUT 1: 近景双人镜头，一位戴细框眼镜、穿白色短袖 Polo 衫系红领巾的初中女生与一位"
         "穿军绿色立领军装、戴红星军帽的年轻战士面对面、处于同一光照环境、"
@@ -348,10 +347,20 @@ TASKS[30] = dict(
 )
 
 TASKS[31] = dict(
-    slug="xu_nudges_zhang_to_slow_down", seed=9712,
+    slug="xu_nudges_zhang_to_slow_down", seed=9731,
     ref1=G_ZHANG_XU, ref2=SCENE, dur=3.0,
     prompt=(
-        "CUT 1: 中近景双人镜头，两位初中生处在同一光照环境、画面是一个完整连续的空间："
+        # ★ 2026-09-16 修复「场景漂移成白天教室」（README §6.10）：
+        #   旧版把环境锚点（土壁/沙袋）放在 prompt **末尾**，H3 只读到开头的
+        #   「两位初中生…同一光照环境」就按默认校园场景出图，
+        #   成片出现两侧黑板 + 暖金阳光的**白天教室**（整幕唯一一镜出戏）。
+        #   修法：① 环境锚点**提到最前**（第一句就写死交通壕+沙袋+土壁）；
+        #        ② 正向写「光线来源」而不是只写「灰蒙蒙」；
+        #        ③ 换 seed（旧 seed 落在坏支上）。
+        "CUT 1: 灰蒙蒙的战前交通壕里，土壁与沙袋堆成的壕壁占满背景，"
+        "坑道口透进一线微光、被炸松的焦土与弹坑；"
+        "中近景双人镜头，两位穿白色短袖 Polo 衫系红领巾的初中男生站在壕沟里、"
+        "处在同一光照环境、画面是一个完整连续的空间："
         "左边那位（男生，不戴眼镜）神情冷静、抬起手腕轻轻碰了一下身边同伴的胳膊，"
         "动作很轻、是提醒的意思；右边那位（男生）还在兴头上；"
         "两人的面貌、发型与服装严格照 <Picture 1>；"
@@ -363,7 +372,7 @@ TASKS[31] = dict(
 
 TASKS[32] = dict(
     slug="xu_answers_politely", seed=9713,
-    ref1=G_XU_SOL_HUANG, ref2=SCENE, dur=6.0,
+    ref1=G_XU_SOL_HUANG, ref2=SCENE, dur=4.0,
     prompt=(
         "CUT 1: 中景三人镜头，一位穿白色短袖 Polo 衫系红领巾的初中男生（不戴眼镜）、"
         "一位穿军绿色立领军装戴红星军帽的年轻战士，与稍远处另一名志愿军战士，"
@@ -434,8 +443,7 @@ TASKS[36] = dict(
         "戴军帽的战士也跟着笑了，低头看着他；"
         "三人的面貌、发型与服装严格照 <Picture 1>" + GUARD_HUANG + "；"
         "背景是 <Picture 2> 那条灰蒙蒙的战前交通壕，土壁与沙袋；"
-        + LIGHT + "。镜头缓慢向后拉（slow pull back）。\n"
-        "★ 全画面不得出现任何可读的文字、字幕或符号。\n"
+        + LIGHT + "。镜头缓慢向后拉（slow pull back）；★ 全画面不得出现任何可读的文字、字幕或符号。画面上没有任何文字、字幕或标识，人物脸上只有表演。\n"
         "Audio: 风声（后期）；小战士压着嗓子兴奋地喊：继光哥！你听见没！打赢了！"
     ),
 )
@@ -470,7 +478,7 @@ TASKS[38] = dict(
 
 TASKS[39] = dict(
     slug="young_soldier_and_huang_promise", seed=9720,
-    ref1=G_YOUNG_SOL_HUANG, ref2=SCENE, dur=7.0,
+    ref1=G_YOUNG_SOL_HUANG, ref2=SCENE, dur=8.0,
     prompt=(
         "CUT 1: 手部特写镜头（close-up）。一位穿着偏大军绿色立领军装的年轻小战士"
         "（不戴领章）伸出手，拉住身边那位穿军绿色立领军装、戴红星军帽的"
@@ -530,7 +538,7 @@ TASKS[42] = dict(
 
 TASKS[43] = dict(
     slug="huang_stands_tells_them_to_go_back", seed=9724,
-    ref1=G_FOUR_HUANG, ref2=SCENE, dur=5.0,
+    ref1=G_FOUR_HUANG, ref2=SCENE, dur=4.0,
     prompt=(
         "CUT 1: 中景多人镜头，五个人（四位穿白色短袖 Polo 衫系红领巾的初中生，"
         "与一位穿军绿色立领军装、戴红星军帽的年轻战士）在交通壕里、处于同一光照环境、"
@@ -562,7 +570,7 @@ TASKS[44] = dict(
 
 TASKS[45] = dict(
     slug="huang_turns_waves_goodbye", seed=9726,
-    ref1=G_FOUR_HUANG, ref2=SCENE, dur=6.0,
+    ref1=G_FOUR_HUANG, ref2=SCENE, dur=5.0,
     prompt=(
         "CUT 1: 全景多人镜头，五个人（四位穿白色短袖 Polo 衫系红领巾的初中生，"
         "与一位穿军绿色立领军装、戴红星军帽的年轻战士）在交通壕里、处于同一光照环境、"

@@ -14,10 +14,15 @@
   🎵 音频层
     qwen3_tts                Qwen3-TTS 语音合成.json
     ace_step_t2audio         ACE-Step 1.5 文生音频.json
+    stable_audio_3_sfx       Stable Audio 3 音效生成.json   ⭐ 音效/氛围首选
   🔎 识别层
     qwen3_asr                Qwen3-ASR 语音识别.json   (配音核对：mp4 音轨 → 文字)
+    sound_caption            Sound Caption (LAION Whisper).json
+                             (音效描述：听到什么/什么音色/像什么来源；无 ASR 能力)
     image_segmentation_sam3  Image Segmentation (SAM3).json
                              (开放词汇检测/分割；图片或**视频抽帧**逐帧体检)
+    face_feature             Face Feature (InsightFace).json
+                             (人脸检测 + ArcFace 512 维特征，可与定妆照比对)
 
   🧰 辅助：comfyui_status / comfyui_upload_image / comfyui_get_result
 
@@ -76,6 +81,9 @@ WORKFLOWS: dict[str, str] = {
     "h3_i2v": "video_minimax_h3_i2v.json",
     "h3_r2v": "video_minimax_h3_r2v.json",
     "h3_t2v": "video_minimax_h3_t2v.json",
+    "sfx": "Stable Audio 3 音效生成.json",
+    "caption": "Sound Caption (LAION Whisper).json",
+    "face": "Face Feature (InsightFace).json",
 }
 
 # Qwen3-TTS 预置音色（填非预置名 → ValueError，见 README §13.7）
@@ -261,18 +269,23 @@ def _wait(pid: str, timeout: int) -> dict:
     )
 
 # ── 参考图上传（LoadImage 只能读取已注册到 ComfyUI input 的文件）──
-def _upload_image(image_path: str, target_name: Optional[str] = None) -> str:
-    """把本地图像上传到 ComfyUI input，返回 LoadImage 可用的文件名。"""
-    src = Path(image_path)
+def _upload_media(file_path: str, target_name: Optional[str] = None,
+                  kind: str = "参考图") -> str:
+    """把本地文件上传到 ComfyUI input，返回节点可用的文件名。
+
+    ComfyUI 的 ``/upload/image`` 对文件类型不做校验，音频同样走这个端点；
+    上传后 :class:`LoadAudio` 的 COMBO 列表里就会出现该文件。
+    """
+    src = Path(file_path)
     if not src.is_absolute():
         src = PROJECT_ROOT / src
     if not src.exists():
-        raise FileNotFoundError(f"输入图像不存在: {src}")
+        raise FileNotFoundError(f"{kind}不存在: {src}")
 
-    # 中文/空格文件名在部分环境下会让 LoadImage 失败 → 归一化为 ASCII 名
+    # 中文/空格文件名在部分环境下会让节点失败 → 归一化为 ASCII 名
     fname = target_name or src.name
     if any(ord(ch) > 127 for ch in fname) or " " in fname:
-        fname = f"mcp_ref_{uuid.uuid4().hex[:8]}{src.suffix.lower() or '.png'}"
+        fname = f"mcp_{uuid.uuid4().hex[:8]}{src.suffix.lower()}"
 
     boundary = "----ComfyUIMCPBoundary" + uuid.uuid4().hex
     parts = [
@@ -290,7 +303,7 @@ def _upload_image(image_path: str, target_name: Optional[str] = None) -> str:
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=300) as resp:
             result = json.loads(resp.read().decode("utf-8", errors="replace"))
         name = result.get("name", fname)
         sub = result.get("subfolder", "")
@@ -302,7 +315,12 @@ def _upload_image(image_path: str, target_name: Optional[str] = None) -> str:
             shutil.copy2(src, dst)
             return fname
         except Exception:
-            raise RuntimeError(f"上传参考图失败: {e}") from e
+            raise RuntimeError(f"上传{kind}失败: {e}") from e
+
+
+def _upload_image(image_path: str, target_name: Optional[str] = None) -> str:
+    """把本地图像上传到 ComfyUI input（``_upload_media`` 的语义化别名）。"""
+    return _upload_media(image_path, target_name, kind="输入图像")
 
 
 # ── 输出收集与下载 ────────────────────────────────────────────────
@@ -962,6 +980,258 @@ def video_minimax_h3_t2v(
                              seed_used, aspect_ratio, megapixels))
     except Exception as e:
         return _err(f"video_minimax_h3_t2v 失败: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+# 🔊 音效层（Stable Audio 3）
+# ══════════════════════════════════════════════════════════════════
+@mcp.tool()
+def stable_audio_3_sfx(
+    prompt: str,
+    negative_prompt: str = "",
+    duration: float = 8.0,
+    seed: int = -1,
+    steps: int = 8,
+    cfg: float = 1.0,
+    sampler_name: str = "lcm",
+    scheduler: str = "simple",
+    quality: str = "V0",
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Stable Audio 3 文生音效/音频（工作流 `Stable Audio 3 音效生成.json`）。
+
+    **本项目的音效生成首选工具**：把一句英文声音描述变成真实音频，
+    适合 foley / 环境底噪 / 单次音效 / 短音乐片段。
+
+    Args:
+        prompt: 英文声音描述，讲究「**声源 + 动作 + 材质/空间 + 质感**」，
+            例 `"short punchy sound effect of a paper plane whooshing past, clean recording"`。
+        negative_prompt: 负向描述（默认空）。
+        duration: 时长（秒）；官方建议音效 1–10 s，短音乐 10–60 s。
+        seed: 随机种子；-1 = 随机（会回传实际值，便于复现与对齐）。
+        steps: 采样步数；Turbo/LCM 配方 **8 步**即可。
+        cfg: 引导强度；LCM 配方用 **1.0**。
+        sampler_name: 采样器；官方图为 **lcm**。
+        scheduler: 调度器；官方图为 **simple**。
+        quality: MP3 质量，V0 / 128k / 320k。
+        filename_prefix: 保存前缀，默认 `sfx/<时间戳>_stable_audio_3`。
+        output_dir: 输出目录，默认 `OUTPUT/sfx`。
+        wait: True 阻塞等待；False 仅提交（用 comfyui_get_result 取回）。
+        timeout_seconds: 等待超时秒数（8 步小模型通常 10–60 s）。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, duration_sec, files, ...}
+    """
+    try:
+        seed_used = _pick_seed(seed)
+        wf = _load_workflow("sfx")
+
+        encoders = sorted(
+            ((nid, n) for nid, n in wf.items()
+             if n.get("class_type") == "CLIPTextEncode"),
+            key=lambda x: int(x[0]),
+        )
+        if not encoders:
+            return _err("工作流缺少 CLIPTextEncode 节点")
+        encoders[0][1]["inputs"]["text"] = prompt.strip()
+        if len(encoders) > 1:
+            encoders[1][1]["inputs"]["text"] = negative_prompt.strip()
+
+        _set_inputs(wf, "EmptyLatentAudio", seconds=float(duration), batch_size=1)
+        _set_inputs(wf, "KSampler", seed=seed_used, steps=int(steps), cfg=float(cfg),
+                    sampler_name=sampler_name, scheduler=scheduler, denoise=1.0)
+        prefix = filename_prefix or f"sfx/{_now()}_stable_audio_3"
+        _set_inputs(wf, "SaveAudioMP3", filename_prefix=prefix, quality=quality)
+
+        out_dir = _resolve_output_dir(output_dir, "sfx")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "stable_audio_3_sfx",
+            "workflow": WORKFLOWS["sfx"],
+            "seed": seed_used,
+            "duration_sec": float(duration),
+            "steps": int(steps),
+            "cfg": float(cfg),
+            "sampler": sampler_name,
+            "prompt_chars": len(prompt),
+        })
+    except Exception as e:
+        return _err(f"stable_audio_3_sfx 失败: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+# 🔎 音频理解层 · 音效描述（LAION Whisper）
+# ══════════════════════════════════════════════════════════════════
+def _caption_dirs() -> tuple[str, str]:
+    root = _detect_comfyui_root() / "models" / "audio_captioning"
+    return (str(root / "laion_sound_effect_captioning_whisper"),
+            str(root / "whisper_small_processor"))
+
+
+def _hoist_inline_text(data: dict, key: str) -> dict:
+    """把节点回传的 text_inline JSON 解析出来提到顶层（便于直接取用）。"""
+    for f in data.get("files") or []:
+        text = f.get("text")
+        if not text:
+            continue
+        try:
+            data[key] = json.loads(text)
+        except (ValueError, TypeError):
+            data[key] = text
+        break
+    return data
+
+
+@mcp.tool()
+def sound_caption(
+    audio: str,
+    max_new_tokens: int = 400,
+    num_beams: int = 1,
+    model_dir: str = "",
+    processor_dir: str = "",
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 900,
+) -> str:
+    """音效描述 · LAION Sound-Effect Captioning Whisper（工作流 `Sound Caption (LAION Whisper).json`）。
+
+    把**任意音频（含 mp4 的音轨）**变成一段英文自然语言描述，讲清「听到了什么、
+    什么音色、像什么来源」—— 用于验收镜头音效是否符合分镜要求。
+
+    Args:
+        audio: 音频或视频路径（.wav/.flac/.mp3/.mp4 …），相对路径按**项目根**解析；
+            会自动上传到 ComfyUI input。
+        max_new_tokens: 生成长度上限，默认 400（够写一段话）。
+        num_beams: 1 = 贪心（官方推荐，快）；4 = 略好一点但更慢。
+        model_dir: 模型目录，留空用 `models/audio_captioning/laion_sound_effect_captioning_whisper`。
+        processor_dir: processor 目录，留空用 `models/audio_captioning/whisper_small_processor`。
+        output_dir: 输出目录，默认 `OUTPUT/caption`。
+        wait: True 阻塞等待；False 仅提交。
+        timeout_seconds: 等待超时秒数（CPU 上 30 s 音频约 10–40 s）。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, caption_json, files, ...}
+
+    Note:
+        * 该模型**没有 ASR 能力**（台词转写请用 `qwen3_asr`），它只描述声音本身；
+        * 单次输入上限 **30 s**，更长请先切段（返回里 `truncated_to_30s` 会标注）；
+        * 描述风格偏「the audio features …」，属模型训练风格，不是错误。
+    """
+    try:
+        d_model, d_proc = _caption_dirs()
+        wf = _load_workflow("caption")
+        name = _upload_media(audio, kind="音频")
+
+        _set_inputs(wf, "LoadAudio", audio=name)
+        _set_inputs(wf, "LAIONAudioCaption",
+                    model_dir=model_dir or d_model,
+                    processor_dir=processor_dir or d_proc,
+                    max_new_tokens=int(max_new_tokens),
+                    num_beams=int(num_beams))
+
+        out_dir = _resolve_output_dir(output_dir, "caption")
+        raw = _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "sound_caption",
+            "workflow": WORKFLOWS["caption"],
+            "audio_input": name,
+            "model": "laion/sound-effect-captioning-whisper",
+        })
+        if not wait:
+            return raw
+        return _dump(_hoist_inline_text(json.loads(raw), "caption_json"))
+    except Exception as e:
+        return _err(f"sound_caption 失败: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+# 👤 人脸层 · 检测 + ArcFace 特征（InsightFace）
+# ══════════════════════════════════════════════════════════════════
+@mcp.tool()
+def face_feature(
+    paths: str,
+    model_name: str = "buffalo_l",
+    provider: str = "CPU",
+    det_size: int = 640,
+    min_det_score: float = 0.3,
+    include_embedding: bool = True,
+    reembed_px: int = 512,
+    max_images: int = 256,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 900,
+) -> str:
+    """人脸检测 + 特征提取 · InsightFace（工作流 `Face Feature (InsightFace).json`）。
+
+    **一次任务可处理整批图**：给目录 / 通配符 / 多路径，即可拿到每张图的人脸框、
+    脸高像素、5 点关键点与 **ArcFace 512 维特征向量**（用于和定妆照比对）。
+
+    Args:
+        paths: 图片路径，支持三种写法 ——
+            ① 项目相对/绝对单文件：`ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_closeup_v02_16x9.png`；
+            ② 目录：`OUTPUT/05_classroom_night/frames`（取该目录下所有 png/jpg）；
+            ③ 通配符：`OUTPUT/06_trench/frames/s19_*.jpg`；
+            多个条目用换行 / 逗号 / 分号分隔。
+        model_name: `buffalo_l`（SCRFD det_10g + ArcFace R50，快）或
+            `antelopev2`（scrfd_10k + ArcFace R100，更准）。
+        provider: CPU（本项目用它，不抢显存）或 CUDA。
+        det_size: 检测输入边长，默认 640；小脸多时可提到 1024。
+        min_det_score: 检出阈值，默认 0.3（越低越灵敏）。
+        include_embedding: 是否附带 512 维特征（默认 True）。
+        reembed_px: **小脸修正**（默认 512，0 = 关闭）：把每张脸按 bbox 外扩 35% 裁出、
+            放大到脸高 ≈ 该值后**重提一次 ArcFace 特征**。远景小脸（<250 px）在整帧上
+            提的特征会严重失真（README §6.5），开启后显著改善；返回里会带
+            `reembed_crop_px` / `reembed_det_score` 便于核对是否真的重提成功。
+        max_images: 单任务最多处理多少张（默认 256）。
+        output_dir: 输出目录（结果以 text 回传），默认 `OUTPUT/face_feature`。
+        wait: True 阻塞等待；False 仅提交。
+        timeout_seconds: 等待超时秒数（CPU 约 0.4 s/张 + 首次加载约 10 s）。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, face_json, files, ...}
+        `face_json.images[i]` = {file, width, height, face_count, faces[]}，
+        每张脸 {bbox, face_px_h, face_px_w, det_score, kps, embedding(512)}，**主脸排第一**。
+
+    Note:
+        ⚠️ 绝对余弦相似度**不可**直接当判据（跨域比对会失真，见项目 README §6.5）：
+        请用**相对排名 + 明显差距**，并确认 `face_px_h ≥ 250`，否则该镜判「不可判」。
+    """
+    try:
+        wf = _load_workflow("face")
+
+        # 项目相对路径 → 绝对路径（节点在本机执行，可直接读盘）
+        norm: list[str] = []
+        for raw in str(paths).replace(";", "\n").replace(",", "\n").split("\n"):
+            p = raw.strip().strip('"')
+            if not p:
+                continue
+            cand = Path(p)
+            if not cand.is_absolute():
+                cand = PROJECT_ROOT / p
+            norm.append(str(cand) if (cand.exists() or any(c in p for c in "*?[")) else p)
+        spec = "\n".join(norm) if norm else str(paths)
+
+        _set_inputs(wf, "InsightFaceFeature",
+                    paths=spec,
+                    model_name=model_name,
+                    provider=provider,
+                    det_size=int(det_size),
+                    min_det_score=float(min_det_score),
+                    include_embedding=bool(include_embedding),
+                    reembed_px=int(reembed_px),
+                    max_images=int(max_images))
+
+        out_dir = _resolve_output_dir(output_dir, "face_feature")
+        raw = _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "face_feature",
+            "workflow": WORKFLOWS["face"],
+            "model_name": model_name,
+            "provider": provider,
+            "paths_spec": spec[:500],
+        })
+        if not wait:
+            return raw
+        return _dump(_hoist_inline_text(json.loads(raw), "face_json"))
+    except Exception as e:
+        return _err(f"face_feature 失败: {e}")
 
 # ══════════════════════════════════════════════════════════════════
 # 🧰 辅助工具

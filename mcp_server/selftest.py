@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """MCP 服务器离线自检 —— 不需要 ComfyUI 在线。
 
 校验两件事：
-  1. 12 个工具均已注册到 FastMCP（9 条工作流 + 3 个辅助工具）
+  1. 15 个工具均已注册到 FastMCP（12 条工作流 + 3 个辅助工具）
   2. 每条工作流的参数注入落到了正确的节点上（拦截 `_queue` 检查提交的 workflow）
 
 用法::
@@ -46,6 +46,7 @@ srv._queue = _fake_queue
 srv._wait = lambda pid, timeout: {"outputs": {}}                    # noqa: E731
 srv._save_outputs = lambda entry, out_dir: []                      # noqa: E731
 srv._upload_image = lambda p, target_name=None: "ref_test.png"     # noqa: E731
+srv._upload_media = lambda p, target_name=None, kind="": "mcp_test_media.bin"   # noqa: E731
 srv._upload_audio = lambda p, target_name=None: "audio_test.wav"   # noqa: E731
 srv._extract_audio = lambda p: p                                   # noqa: E731
 # SAM3 视频模式：抽帧与掩膜体检都依赖 ffmpeg，离线用例改为桩
@@ -78,14 +79,14 @@ def main() -> int:
     tools = sorted(t.name for t in srv.mcp._tool_manager.list_tools())
     expected = [
         "ace_step_t2audio", "comfyui_get_result", "comfyui_status",
-        "comfyui_upload_image", "image_edit_longcat",
+        "comfyui_upload_image", "face_feature", "image_edit_longcat",
         "image_segmentation_sam3",
-        "qwen3_asr", "qwen3_tts",
+        "qwen3_asr", "qwen3_tts", "sound_caption", "stable_audio_3_sfx",
         "video_minimax_h3_i2v", "video_minimax_h3_r2v",
         "video_minimax_h3_t2v", "z_image_turbo_t2i",
     ]
-    _check("工具数量 = 12（FireRed 已于 2026-09-13 移除；qwen3_asr / image_segmentation_sam3 已加入）",
-           len(tools) == 12,
+    _check("工具数量 = 15（FireRed 已移除；2026-09-16 新增 stable_audio_3_sfx / sound_caption / face_feature）",
+           len(tools) == 15,
            f"实际 {len(tools)}: {tools}")
     for name in expected:
         _check(f"已注册 {name}", name in tools)
@@ -140,9 +141,6 @@ def main() -> int:
            sav["format"] == "flac" and sav["filename_prefix"].startswith("tts/"))
     bad = json.loads(srv.qwen3_tts(text="x", speaker="不存在的音色"))
     _check("非法 speaker 被拒绝", bad.get("ok") is False, str(bad))
-
-    # 5. ACE-Step
-    print("\n[5] ace_step_t2audio")
 
     # 4b. Qwen3-ASR（配音核对）
     print("\n[4b] qwen3_asr")
@@ -238,6 +236,58 @@ def main() -> int:
             _VIDEO_FIXTURE.unlink()
         except Exception:
             pass
+
+    # 4e. 新增三件套（2026-09-16）：音效生成 / 音效描述 / 人脸特征
+    print("\n[4e] stable_audio_3_sfx / sound_caption / face_feature")
+
+    res, wf = call(srv.stable_audio_3_sfx,
+                   prompt="paper plane whooshing past, clean foley",
+                   negative_prompt="music", duration=6.5, seed=777,
+                   steps=8, cfg=1.0, filename_prefix="sfx/selftest")
+    _check("提交成功且回传 seed", res.get("ok") is True and res.get("seed") == 777,
+           str(res)[:200])
+    _check("duration 注入 EmptyLatentAudio",
+           inputs_of(wf, "EmptyLatentAudio")[0]["seconds"] == 6.5,
+           str(inputs_of(wf, "EmptyLatentAudio")))
+    enc = sorted(((k, n) for k, n in wf.items()
+                  if n.get("class_type") == "CLIPTextEncode"), key=lambda x: int(x[0]))
+    _check("正向 prompt 进第 1 个 CLIPTextEncode",
+           enc[0][1]["inputs"]["text"] == "paper plane whooshing past, clean foley")
+    _check("负向 prompt 进第 2 个 CLIPTextEncode",
+           enc[1][1]["inputs"]["text"] == "music")
+    ks = inputs_of(wf, "KSampler")[0]
+    _check("KSampler 取 LCM 配方（steps/cfg/sampler/scheduler）",
+           ks["steps"] == 8 and ks["cfg"] == 1.0
+           and ks["sampler_name"] == "lcm" and ks["scheduler"] == "simple", str(ks)[:200])
+    _check("SaveAudioMP3 前缀注入",
+           inputs_of(wf, "SaveAudioMP3")[0]["filename_prefix"] == "sfx/selftest")
+    _check("CLIPLoader 用 stable_audio 类型的 t5gemma",
+           inputs_of(wf, "CLIPLoader")[0]["type"] == "stable_audio")
+
+    res, wf = call(srv.sound_caption, audio="OUTPUT/_selftest_audio_fixture.wav",
+                   max_new_tokens=256, num_beams=1)
+    _check("提交成功且回传 audio_input",
+           res.get("ok") is True and res.get("audio_input") == "mcp_test_media.bin",
+           str(res)[:200])
+    _check("LoadAudio 指向上传后的文件名",
+           inputs_of(wf, "LoadAudio")[0]["audio"] == "mcp_test_media.bin")
+    cap = inputs_of(wf, "LAIONAudioCaption")[0]
+    _check("max_new_tokens / num_beams 注入，且模型目录非空",
+           cap["max_new_tokens"] == 256 and cap["num_beams"] == 1
+           and cap["model_dir"].endswith("laion_sound_effect_captioning_whisper"),
+           str(cap)[:300])
+
+    res, wf = call(srv.face_feature,
+                   paths="ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_closeup_v02_16x9.png",
+                   model_name="buffalo_l", provider="CPU", det_size=1024,
+                   min_det_score=0.4, reembed_px=512, max_images=32)
+    _check("提交成功", res.get("ok") is True, str(res)[:200])
+    face = inputs_of(wf, "InsightFaceFeature")[0]
+    _check("参数注入 InsightFaceFeature",
+           face["model_name"] == "buffalo_l" and face["det_size"] == 1024
+           and face["min_det_score"] == 0.4 and face["reembed_px"] == 512 and face["max_images"] == 32, str(face)[:300])
+    _check("项目相对路径已转成绝对路径（节点才能读盘）",
+           "ASSETS" in face["paths"] and ":\\" in face["paths"], face["paths"][:200])
 
     # 5. ACE-Step
     print("\n[5] ace_step_t2audio")

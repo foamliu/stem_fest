@@ -1,160 +1,136 @@
 # -*- coding: utf-8 -*-
-"""精确定位每个泄漏镜的字幕框 —— 多时间点抽样 + 自动检测字幕行。
+"""字幕框定位 v2：白字 + 描边特征，专抓硬字幕。
 
-★ 为什么不能用一个统一框（2026-09-15 教训）
-    `_delogo.py` 初版用 x=293 y=478 w=470 h=46 套全部 9 镜，核对图显示
-    **只有镜 14 是准的**。原因：各镜**景别不同**（近景/中景/双人/群像），
-    H3 放字幕的位置随构图浮动，且**同一镜不同时段的字幕位置也可能不同**。
+改进点（vs v1）：
+  · 用「高亮白像素 + 邻近暗描边」做主特征（硬字幕 = 白字 + 黑描边）
+  · 要求横条宽高比 ≥ 2.0（字幕是横排）
+  · 只在下部 42% 搜索；取最靠下的候选（字幕贴底）
+  · 支持 --box=N:x,y,w,h 手动覆盖（自动失败时）
+  · 出核对图（红框）供人工确认
 
-★ 本脚本做法
-    1. 每镜抽 8 个时间点（0.15–0.9 时长），每帧裁**下部 45%** 放大保存；
-    2. 用 OpenCV 做**形态学检测**（白色/高对比度横排笔画）自动找候选行；
-    3. 输出每镜的候选框 + 拼图供人眼最终确认。
-
-用法
+用法：
+    py -3.10 OUTPUT/_locate_subs.py --shots=14,21,36
     py -3.10 OUTPUT/_locate_subs.py --all
-    py -3.10 OUTPUT/_locate_subs.py --shots=77
+    py -3.10 OUTPUT/_locate_subs.py --shots=85 --box=85:200,540,660,60
 """
+import glob
 import os
-import subprocess
 import sys
 
-try:
-    import cv2
-    import numpy as np
-    HAVE_CV = True
-except ImportError:
-    HAVE_CV = False
+import cv2
+import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, "OUTPUT")
-sys.path.insert(0, OUT)
-
-from _delogo import SHOTS, newest, probe_size  # noqa: E402
-
-FRACS = [0.12, 0.22, 0.32, 0.42, 0.52, 0.62, 0.72, 0.82]
+LEAKS = [14, 21, 36, 77, 85, 86, 88, 112]
+NFR = 10
+BAND_TOP = 0.58          # 下部 42%
 
 
-def grab(src, t, dst):
-    subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", "%.2f" % t, "-i", src,
-                    "-frames:v", "1", dst], capture_output=True)
-    return os.path.exists(dst)
+def newest(shot):
+    cand = []
+    for pat in (
+        os.path.join(ROOT, "OUTPUT", "**", "video", "*_%02d_*.mp4" % shot),
+        os.path.join(ROOT, "OUTPUT", "**", "video", "%d_*.mp4" % shot),
+    ):
+        cand += [f for f in glob.glob(pat, recursive=True)
+                 if "_bak_" not in os.path.basename(f)]
+    cand = sorted(set(cand), key=os.path.getmtime)
+    return cand[-1] if cand else None
 
 
-def detect(img):
-    """检测横排字幕笔画：白色高亮 + 横向连通 → 返回候选行 (y, h, x, w, score)。"""
-    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # 字幕 = 亮字（近白）压在较暗背景上；用高阈值取笔画
-    _, th = cv2.threshold(g, 200, 255, cv2.THRESH_BINARY)
-    # 横向膨胀把字连成行（字幕字距小、行内方向水平）
-    k = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 3))
-    m = cv2.morphologyEx(th, cv2.MORPH_CLOSE, k)
-    cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    H, W = g.shape
+def read_frames(path, n=NFR):
+    cap = cv2.VideoCapture(path)
+    tot = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
     out = []
-    for c in cnts:
-        x, y, w, h = cv2.boundingRect(c)
-        # 字幕特征：横向长条（宽 >> 高）、位于中下部、宽度占画面 15%–85%
-        if h < 12 or h > 70:
+    for i in range(n):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(tot * (i + 0.5) / n))
+        ok, fr = cap.read()
+        if ok:
+            out.append(fr)
+    cap.release()
+    return out
+
+
+def sub_mask(fr, y0):
+    """下部区域的「字幕候选」掩膜：亮白像素 + 邻近暗描边。"""
+    band = fr[y0:, :]
+    g = cv2.cvtColor(band, cv2.COLOR_BGR2GRAY)
+    bright = (g > 200).astype(np.uint8)
+    dark = (g < 95).astype(np.uint8)
+    dk = cv2.dilate(dark, np.ones((9, 9), np.uint8))
+    cand = cv2.bitwise_and(bright, dk)
+    cand = cv2.bitwise_or(cand, bright)
+    return cv2.morphologyEx(cand, cv2.MORPH_CLOSE, np.ones((3, 17), np.uint8))
+
+
+def locate(shot, manual=None):
+    p = newest(shot)
+    if not p:
+        return None
+    frs = read_frames(p)
+    if len(frs) < 3:
+        return None
+    h, w = frs[0].shape[:2]
+    if manual:
+        return {"shot": shot, "src": p, "box": manual, "size": (w, h),
+                "auto": False}
+
+    y0 = int(h * BAND_TOP)
+    masks = np.stack([sub_mask(f, y0) for f in frs], 0)
+    stable = (masks.mean(0) >= 0.6).astype(np.uint8)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(stable, 8)
+    cands = []
+    for i in range(1, n):
+        x, y, ww, hh, area = stats[i]
+        if area < 250 or ww < w * 0.05:
             continue
-        if w < W * 0.15 or w > W * 0.92:
+        if ww / max(1, hh) < 2.0:          # 字幕横排 → 扁
             continue
-        if w / float(h) < 3.5:
+        if hh > h * 0.18:                  # 太高 → 不是字幕
             continue
-        if y < H * 0.45:
-            continue
-        # 该框内的“白像素密度”要够高（真笔画），排除亮背景
-        roi = th[y:y + h, x:x + w]
-        dens = roi.mean() / 255.0
-        if dens < 0.10 or dens > 0.75:
-            continue
-        out.append((y, h, x, w, round(dens, 3)))
-    out.sort(key=lambda r: -r[4])
-    return out[:3]
+        cands.append((area, x, y, ww, hh))
+    if not cands:
+        return {"shot": shot, "src": p, "box": None, "size": (w, h),
+                "auto": True, "n_cands": 0}
+    cands.sort(key=lambda c: (-(c[2] + c[4]), -c[0]))   # 最靠下 + 面积大
+    area, x, y, ww, hh = cands[0]
+    pad_x, pad_y = 10, 8
+    X = max(0, x - pad_x)
+    Y = max(0, y0 + y - pad_y)
+    W = min(w - X, ww + 2 * pad_x)
+    H = min(h - Y, hh + 2 * pad_y)
+    return {"shot": shot, "src": p, "box": (X, Y, W, H), "size": (w, h),
+            "auto": True, "n_cands": len(cands)}
 
 
 def main():
-    shots, allf = [], False
+    want = LEAKS
+    manual = {}
     for a in sys.argv[1:]:
         if a.startswith("--shots="):
-            shots = [int(x) for x in a.split("=", 1)[1].split(",")]
-        elif a == "--all":
-            allf = True
-    if allf:
-        shots = sorted(SHOTS)
-    if not shots:
-        print("用法：--all 或 --shots=7,14")
-        return 1
-    if not HAVE_CV:
-        print("[X] 需要 opencv-python：py -3.10 -m pip install opencv-python")
-        return 1
-
-    tmp = os.path.join(OUT, "_locate")
-    os.makedirs(tmp, exist_ok=True)
-    from PIL import Image, ImageDraw
-
-    for n in shots:
-        act, slug, _ = SHOTS[n]
-        src = newest(act, slug)
-        d = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
-                            "format=duration", "-of", "csv=p=0", src],
-                           capture_output=True, text=True)
-        dur = float(d.stdout.strip())
-        W, H = probe_size(src)
-        print("=" * 78)
-        print("[镜 %-3d] %s  %dx%d  %.2fs" % (n, os.path.basename(src), W, H, dur))
-
-        tiles, hits = [], []
-        for fr in FRACS:
-            t = dur * fr
-            p = os.path.join(tmp, "_f%03d_%02d.png" % (n, int(fr * 100)))
-            if not grab(src, t, p):
-                continue
-            img = cv2.imread(p)
-            for cand in detect(img):
-                hits.append((fr, cand))
-                print("   %.0f%%(%.2fs)  候选 y=%-4d h=%-3d x=%-4d w=%-4d 密度=%.3f"
-                      % (fr * 100, t, cand[0], cand[1], cand[2], cand[3], cand[4]))
-            tiles.append((fr, t, Image.open(p).convert("RGB")))
-
-        if not hits:
-            print("   （无自动候选 —— 可能字幕为暗字/低对比，需人眼定框）")
-
-        # 拼图：2 列 x 4 行，带红色候选框
-        tw = 560
-        th = int(H * tw / W) + 18
-        canvas = Image.new("RGB", (tw * 2, th * 4), (12, 12, 14))
-        dr = ImageDraw.Draw(canvas)
-        for i, (fr, t, im) in enumerate(tiles[:8]):
-            im = im.resize((tw, th - 18))
-            x0, y0 = (i % 2) * tw, (i // 2) * th
-            dr.text((x0 + 4, y0 + 2), "SHOT %d  %.0f%%  %.2fs" % (n, fr * 100, t),
-                    fill=(255, 210, 120))
-            # 画该帧的候选框
-            for fr2, (y, h, x, w, dn) in hits:
-                if abs(fr2 - fr) < 1e-6:
-                    sx, sy = tw / float(W), (th - 18) / float(H)
-                    dr.rectangle([x0 + x * sx, y0 + 18 + y * sy,
-                                  x0 + (x + w) * sx, y0 + 18 + (y + h) * sy],
-                                 outline=(255, 0, 0), width=2)
-            canvas.paste(im, (x0, y0 + 18))
-        pp = os.path.join(tmp, "loc_%03d.jpg" % n)
-        canvas.save(pp, quality=86)
-        print("   ↳ 拼图：%s" % os.path.relpath(pp, ROOT))
-
-        # 汇总建议框（取所有候选的并集，向下取整）
-        if hits:
-            ys = [c[0] for _, c in hits]
-            ye = [c[0] + c[1] for _, c in hits]
-            xs = [c[2] for _, c in hits]
-            xe = [c[2] + c[3] for _, c in hits]
-            bx = max(0, min(xs) - 14)
-            by = max(0, min(ys) - 12)
-            bw = min(W - bx, max(xe) - min(xs) + 28)
-            bh = min(H - by, max(ye) - min(ys) + 24)
-            print("   ★ 建议框（覆盖全部时段）：x=%d y=%d w=%d h=%d" % (bx, by, bw, bh))
-    return 0
+            want = [int(v) for v in a.split("=", 1)[1].split(",") if v]
+        elif a.startswith("--box="):
+            k, v = a.split("=", 1)[1].split(":", 1)
+            manual[int(k)] = tuple(int(t) for t in v.split(","))
+    out = os.path.join(ROOT, "OUTPUT", "_subbox")
+    os.makedirs(out, exist_ok=True)
+    print("%-6s %-24s %-8s %s" % ("镜", "框 (x,y,w,h)", "候选数", "来源"))
+    print("-" * 76)
+    for s in want:
+        r = locate(s, manual.get(s))
+        fn = os.path.basename(r["src"]) if r else "-"
+        if not r or not r["box"]:
+            print("%-6d %-24s %-8s %s" % (s, "(未检出)", "-", fn))
+            continue
+        X, Y, W, H = r["box"]
+        print("%-6d (%4d,%4d,%4d,%4d) %-8s %s" % (
+            s, X, Y, W, H, r.get("n_cands", "手动"), fn))
+        img = read_frames(r["src"], 1)[0]
+        cv2.rectangle(img, (X, Y), (X + W, Y + H), (0, 0, 255), 2)
+        cv2.imwrite(os.path.join(out, "box_%03d.jpg" % s), img)
+    print("-" * 76)
+    print("核对图：%s\\box_<镜>.jpg" % out)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

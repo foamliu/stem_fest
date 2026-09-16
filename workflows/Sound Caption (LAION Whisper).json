@@ -1,0 +1,18 @@
+{
+  "1": {
+    "inputs": { "audio": "example.wav" },
+    "class_type": "LoadAudio",
+    "_meta": { "title": "载入音频（先用 MCP 上传到 ComfyUI input）" }
+  },
+  "2": {
+    "inputs": {
+      "audio": ["1", 0],
+      "model_dir": "E:\\code\\ComfyUI\\models\\audio_captioning\\laion_sound_effect_captioning_whisper",
+      "processor_dir": "E:\\code\\ComfyUI\\models\\audio_captioning\\whisper_small_processor",
+      "max_new_tokens": 400,
+      "num_beams": 1
+    },
+    "class_type": "LAIONAudioCaption",
+    "_meta": { "title": "音效描述 · LAION Whisper（结果以 text 回传）" }
+  }
+}

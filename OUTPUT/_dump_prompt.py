@@ -8,6 +8,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ACT = {
+    7: "_diag_act0_plane.py",
     14: "_diag_act2_startup.py",
     21: "_diag_act1_trench.py", 36: "_diag_act1_trench.py",
     77: "_diag_act4_train.py", 85: "_diag_act4_train.py",

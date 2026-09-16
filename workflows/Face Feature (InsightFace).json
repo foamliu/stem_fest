@@ -1,0 +1,16 @@
+{
+  "1": {
+    "inputs": {
+      "paths": "",
+      "model_name": "buffalo_l",
+      "provider": "CPU",
+      "det_size": 640,
+      "min_det_score": 0.3,
+      "include_embedding": true,
+      "reembed_px": 512,
+      "max_images": 256
+    },
+    "class_type": "InsightFaceFeature",
+    "_meta": { "title": "人脸检测 + ArcFace 特征（结果以 JSON text 回传）" }
+  }
+}
