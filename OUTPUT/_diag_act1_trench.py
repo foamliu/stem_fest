@@ -312,7 +312,7 @@ TASKS[28] = dict(
         "两人的面貌、发型、眼镜与服装严格照 <Picture 1>" + GUARD_GLASSES + GUARD_HUANG + "；"
         "背景是 <Picture 2> 那条灰蒙蒙的战前交通壕，土壁虚化；"
         + LIGHT + "。镜头固定不动。\n"
-        "Audio: 风声（后期）；女生点头说：2026年。"
+        "Audio: 风声（后期）；女生点头说：二零二六年。"
     ),
 )
 
