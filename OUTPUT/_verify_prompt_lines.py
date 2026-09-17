@@ -18,10 +18,17 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LEAKS = [7, 14, 21, 36, 77, 85, 86, 88, 112]
+# ★ 2026-09-17 扩表：本轮修复的镜 1/6/8/12/13/15 也纳入 2 行配方闸门
+#   （原来只有 9 个"历史泄漏镜"；这 6 镜都新增了「只有一个人说话」的说话人指定 +
+#    ONLY_THIS_LINE 禁额外人声后缀，同样必须守住 2 行结构）
+LEAKS = [7, 14, 21, 36, 77, 85, 86, 88, 112, 1, 6, 8, 12, 13, 15]
 ACT = {
+    1: "_diag_act0_plane.py",
+    6: "_diag_act0_plane.py",
     7: "_diag_act0_plane.py",
-    14: "_diag_act2_startup.py",
+    8: "_diag_act0_plane.py",
+    12: "_diag_act2_startup.py", 13: "_diag_act2_startup.py",
+    14: "_diag_act2_startup.py", 15: "_diag_act2_startup.py",
     21: "_diag_act1_trench.py", 36: "_diag_act1_trench.py",
     77: "_diag_act4_train.py", 85: "_diag_act4_train.py",
     86: "_diag_act4_train.py", 88: "_diag_act4_train.py",

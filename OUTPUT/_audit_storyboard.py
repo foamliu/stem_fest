@@ -195,8 +195,19 @@ def evaluate(n, s, t):
 
     P = t["prompt"]
     # ── B. 景别 ──
+    # ★ 2026-09-17 修 false positive：`中近景` 里**包含** `近景`，
+    #   朴素的 `z in P` 会把「中近景镜头」同时算成 `中近景` + `近景`，
+    #   于是每一条中近景镜都误报「同镜应只一个主景别」（镜 6/8/12 等）。
+    #   ⇒ 改成**最长匹配优先**：命中 `中近景` 就把它占用的字符涂掉，
+    #     再在剩余文本里找别的景别词。这样 `中近景` 不再派生 `近景`，
+    #     而「中近景…近景」这种**真的写了两个景别**的情况仍能被抓到。
     want = s["size"]
-    found = [z for z in ALL_SIZES if z in P]
+    masked = P
+    found = []
+    for z in sorted(ALL_SIZES, key=len, reverse=True):     # 长的先来
+        if z in masked:
+            found.append(z)
+            masked = masked.replace(z, "\u3000" * len(z))  # 涂掉，避免子串再命中
     if want in found:
         others = [z for z in found if z != want]
         if others:
