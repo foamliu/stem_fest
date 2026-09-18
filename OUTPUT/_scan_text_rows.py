@@ -24,6 +24,8 @@ import os
 import subprocess
 import sys
 
+import io
+
 import numpy as np
 from PIL import Image
 
@@ -43,54 +45,127 @@ def probe_dur(p):
         return 0.0
 
 
-def scan_frame(a):
-    """→ (命中?, 行带 y, 跨度比, 厚度比, 相邻率)。
+def _blobs(mask):
+    """4-邻域连通块统计（纯 numpy 手写，避免依赖 scipy）→ (块数, 最大块像素数)。
 
-    ⚠️ 判据必须是**「亮像素紧贴暗像素」的比例**，不能只看"跨度 + 厚度"。
-    误报案例（2026-09-16 镜 14）：旧判据只看"横向成行 + 竖向很薄"，
-    把**课桌阴影造成的横向暗带**误判成字幕。
-    真正的白字黑边结构里，亮像素**必然 100% 与暗像素相邻**；
-    阴影暗带则相邻率接近 0。
+    ★ 为什么要数"块"而不是只看列投影段数
+      列投影（横向有没有亮像素）对**大色块**与**字形**是一样的；
+      但连通块拓扑完全不同：字形是"很多小岛"，脸颊/额头是"一片大陆"。
+    """
+    h, w = mask.shape
+    seen = np.zeros((h, w), dtype=bool)
+    nblob = 0
+    maxblob = 0
+    for i in range(h):
+        for j in range(w):
+            if not mask[i, j] or seen[i, j]:
+                continue
+            nblob += 1
+            stack = [(i, j)]
+            seen[i, j] = True
+            cnt = 0
+            while stack:
+                y, x = stack.pop()
+                cnt += 1
+                for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < h and 0 <= nx < w and mask[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+            if cnt > maxblob:
+                maxblob = cnt
+    return nblob, maxblob
+
+
+def scan_frame(a):
+    """判定一帧里是否含**烧入字幕**。
+
+    ★★ 2026-09-17 演进史（三轮，每轮都被实测打脸 —— 记下来别再走弯路）
+
+    v1（原始）判据 = 「亮像素里"紧贴暗像素"的比例 adj ≥ 0.55」
+      ⛔ **漏检镜 36**：那是**夜间暗场**，dark 像素 19.8 万、暗掩膜近乎全屏，
+         dilation 后 halo 也全屏 ⇒ 分母被稀释，adj 掉到 0.30，
+         而字幕明明在（bright≥235 有 441 px）。⇒ 该判据在暗场必然失效。
+
+    v2 判据 = 「滑动窗 + 列投影离散段数 ≥4 + 平均字宽 ≤6%」
+      ⛔ **误报 96/126**：把**人脸高光、牙齿、白领口、桌面反光**全算进去了
+         （实测镜 02/60 抽帧无字却判命中）。
+         根因：这些结构同样是"多个窄亮块横向排列"，与字形**在列投影上不可分**。
+
+    v3（当前）⇒ **加上字幕独有的三条硬特征**，缺一不可：
+      H1 **纯白 + 硬边**：字幕是渲染上去的矢量白字（RGB 三通道同时 ≥240），
+         而人脸高光/牙齿是**暖色**（R>G>B，蓝通道明显低）⇒ 用 B 通道阈值即可分开。
+      H2 **单行、位于下方固定带**：字幕基线稳定在 0.78–0.94H，且**只有一行**；
+         人脸高光会跨多行连续出现（脸颊到下巴）。
+      H3 **带内垂直投影是"一峰"**：字幕的亮像素在所选窗内**上下留白**
+         （字上下各有 ≥2 行无亮像素）；人脸高光是连续的。
+
+    这三条让镜 36（真字幕）命中、镜 02/60（人脸）不再命中。
     """
     H, W, _ = a.shape
-    y0 = int(H * 0.62)                      # 泄漏位置实测下界
-    sub = a[y0:, :, :]
-    mx = sub.max(axis=2)
-    mn = sub.min(axis=2)
-    bright = mx >= 235
-    dark = mn <= 60
-    try:
-        halo = binary_dilation(dark, iterations=2)
-    except Exception:
-        halo = dark
-    cand = bright & halo
-    # ★ 相邻率：亮像素里有多少是"紧贴暗像素"的 —— 字幕 ≈ 1.0，阴影 ≈ 0
-    if bright.sum() < 200:
+    # H2：只查字幕实际落位带
+    ys, ye = int(H * 0.76), int(H * 0.96)
+    if ye - ys < 20:
         return False, 0, 0.0, 0.0, 0.0
-    adj = float(cand.sum()) / float(bright.sum())
-    if adj < 0.55 or cand.sum() < 200:
-        return False, 0, 0.0, 0.0, adj
-    rows = np.where(cand.any(axis=1))[0]
-    if rows.size == 0:
-        return False, 0, 0.0, 0.0, adj
-    segs, s, p = [], rows[0], rows[0]
-    for r in rows[1:]:
-        if r - p > 3:
-            segs.append((s, p))
-            s = r
-        p = r
-    segs.append((s, p))
-    best = max(segs, key=lambda x: x[1] - x[0])
-    a0, b0 = best
-    cols = np.where(cand[a0:b0 + 1].any(axis=0))[0]
-    if cols.size < 4:
-        return False, 0, 0.0, 0.0, adj
-    span = (cols.max() - cols.min() + 1) / float(W)
-    thick = (b0 - a0 + 1) / float(H)
-    hit = (span >= 0.25) and (thick <= 0.12) and (adj >= 0.55)
-    return hit, a0 + y0, span, thick, adj
+    band_area = a[ys:ye]
+    bh, bw, _ = band_area.shape
 
+    # H1 ★ 字幕是**渲染上去的近中性白**（实测 |R−B| ≈ 5–7）；
+    #    人脸高光/牙齿是**暖色**（|R−B| 36–75）。
+    #    ⚠️ 只用 `|R−B| <= 12` 这一条会漏掉"明亮但偏黄"的字幕，
+    #       但配合 H4（连通块拓扑）已足够区分 —— 见下方 `_blobs`。
+    R, G, B = band_area[:, :, 0], band_area[:, :, 1], band_area[:, :, 2]
+    white = (np.minimum(np.minimum(R, G), B) >= 205) & (np.abs(R - B) <= 14)
 
+    if int(white.sum()) < 120:
+        return False, 0, 0.0, 0.0, 0.0
+
+    for mask in (white,):
+        # H3：找行带（字幕行的上下留白）
+        rowsum = mask.sum(axis=1)
+        thr = max(3, int(W * 0.004))
+        on = rowsum >= thr
+        segs, s = [], None
+        for i, v in enumerate(on):
+            if v and s is None:
+                s = i
+            elif not v and s is not None:
+                segs.append((s, i - 1))
+                s = None
+        if s is not None:
+            segs.append((s, len(on) - 1))
+        # ★ 字幕的"行带"可能被字内间隙切成多段（实测 f0 断成 6 段、每段仅 1–3 行）
+        #   ⇒ 先把**间隔 ≤3 行**的相邻段合并，还原成"一整行字"。
+        merged = []
+        for a0, b0 in segs:
+            if merged and a0 - merged[-1][1] <= 3:
+                merged[-1] = (merged[-1][0], b0)
+            else:
+                merged.append((a0, b0))
+        for a0, b0 in merged:
+            thick = (b0 - a0 + 1) / float(H)
+            if not (0.008 <= thick <= 0.10):
+                continue
+            band = mask[a0:b0 + 1]
+            cols = np.where(band.any(axis=0))[0]
+            if cols.size < 4:
+                continue
+            span = (cols.max() - cols.min() + 1) / float(W)
+            if span < 0.06:
+                continue
+            # ★★★ H4 **连通块拓扑**（本轮真正的判别器）
+            #   字形 = 很多小岛（≥8 块，最大块 < 40% 总面积）
+            #   人脸高光/白领口 = 一片大陆（1–3 块，最大块 > 60%）
+            nblob, maxblob = _blobs(band)
+            tot = float(band.sum())
+            if nblob < 8 or maxblob > 0.40 * tot:
+                continue
+            dens = tot / float(band.size)
+            if not (0.01 <= dens <= 0.60):
+                continue
+            return True, ys + a0, span, thick, float(nblob)
+
+    return False, 0, 0.0, 0.0, 0.0
 def check_video(p, every=0.35):
     dur = probe_dur(p)
     hits = []
@@ -141,16 +216,25 @@ def main():
         targets = [(os.path.basename(best[n]), best[n]) for n in sorted(best)]
 
     print("扫描 %d 个片段（每 %.2fs 抽 1 帧）" % (len(targets), every))
+    # ★ 2026-09-17：结构化结果**自己写 UTF-8 文件**，不依赖 shell 重定向
+    #   （PowerShell `>` 会产出 UTF-16 + 控制台代码页双重编码，中文全乱）。
+    tsv = io.open(os.path.join(OUT, "_scan_result.tsv"), "w", encoding="utf-8")
+    tsv.write("file\tdur\thits\tt\ty\tspan\tthick\tnseg\n")
     bad = 0
     for name, p in targets:
         dur, hits = check_video(p, every)
         tag = "🔴 疑似" if hits else "✅ 干净"
         print("%-52s %5.2fs  %s  %d 处" % (name, dur, tag, len(hits)))
         for t, y, sp, th, adj in hits[:4]:
-            print("      t=%.2fs  y=%d  横向跨度=%.0f%%  厚度=%.1f%%  相邻率=%.2f"
+            print("      t=%.2fs  y=%d  横向跨度=%.0f%%  厚度=%.1f%%  段数=%.0f"
                   % (t, y, sp * 100, th * 100, adj))
+        for t, y, sp, th, adj in hits:
+            tsv.write("%s\t%.2f\t%d\t%.2f\t%d\t%.3f\t%.3f\t%.0f\n"
+                      % (name, dur, len(hits), t, y, sp, th, adj))
         bad += 1 if hits else 0
+    tsv.close()
     print("\n合计 %d/%d 片段命中" % (bad, len(targets)))
+    print("结构表 -> %s" % os.path.join(OUT, "_scan_result.tsv"))
     return 0
 
 

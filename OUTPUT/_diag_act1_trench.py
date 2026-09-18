@@ -433,7 +433,7 @@ TASKS[35] = dict(
 )
 
 TASKS[36] = dict(
-    slug="young_soldier_relieved_huang_smiles", seed=9717,
+    slug="young_soldier_relieved_huang_smiles", seed=9740,
     ref1=G_YOUNG_SOL_HUANG, ref2=SCENE, dur=3.0,
     prompt=(
         "CUT 1: 中景三人镜头，一位穿着偏大军绿色立领军装的年轻小战士（不戴领章）、"
