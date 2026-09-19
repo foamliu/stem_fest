@@ -182,6 +182,21 @@ def net_lines(text):
     return out
 
 
+def _digits_to_cn(s):
+    """把阿拉伯数字转成中文数字（逐位），用于台词比对。
+
+    ★ 2026-09-19 修假漂移：`storyboard.md` 里写的是中文数字（`四人`、`两株`、
+      `一株`），而脚本 prompt 里有时写阿拉伯数字（`4 人`）⇒ 朴素的子串比对
+      会把**意思完全一致**的两句判成「台词漂移」。
+      实测受影响的镜：28 / 48 / 76 / 90（把 4/2/1 换成中文即一致）。
+    ⚠️ 只做**逐位映射**（`74` → `七四`），不做数值读法（`七十四`）——
+      因为剧本里中文数字的用法是「七十四个」这种**序数/量词**混写，
+      逐位映射已足够覆盖实测的漂移案例，且不会引入新的误判。
+    """
+    d2c = str.maketrans("0123456789", "零一二三四五六七八九")
+    return s.translate(d2c)
+
+
 def evaluate(n, s, t):
     """→ list of (level, field, msg)；level ∈ {D 漂移, W 存疑}"""
     R = []
@@ -238,18 +253,36 @@ def evaluate(n, s, t):
     lines_p = P.split("\n")
     audio = "\n".join(lines_p[1:]) if len(lines_p) > 1 else P
     a_core = re.sub(r"[，。！？、…—\s\"“”‘’']", "", audio)
+    # ★ 2026-09-19：数字归一化后再比（阿拉伯 ↔ 中文），修 28/48/76/90 的假漂移
+    a_core_n = _digits_to_cn(a_core)
     for ln in net_lines(s["line"]):
         if not ln:
             continue
         core = re.sub(r"[，。！？、…—\s\"“”‘’']", "", ln)
-        if core and core not in a_core:
-            R.append(("D", "台词", "storyboard「%s」不在台词区" % ln))
+        if not core:
+            continue
+        if core in a_core or _digits_to_cn(core) in a_core_n:
+            continue
+        R.append(("D", "台词", "storyboard「%s」不在台词区" % ln))
 
     # ── F. 画面文字风险 ──
     if "**" in P:
         R.append(("D", "文字风险", "prompt 含 Markdown `**`（会被 H3 当字写）"))
     if "（后期）" in P:
         R.append(("W", "文字风险", "prompt 含「（后期）」（strip 后仍残留）"))
+
+    # ── G. 假漂移识别（2026-09-19 新增）──
+    #   以下三类镜**画面本来就该有文字**，`_scan_text_rows.py` 必然命中，
+    #   不能当作「字幕泄漏」处置（README §6.10.2 两类假漂移）：
+    #     ① 白屏日记字镜（46/74/105）：白底黑字卡片 —— 字是**内容**不是泄漏
+    #     ② 黑屏字幕镜：黑底白字
+    #     ③ 校名牌镜（镜 1）：参考图里本来就有校名（§6.9b）
+    #   ⇒ 标记出来，供人工复核时跳过；**不产生 D 级告警**。
+    P_blank = re.sub(r"[\s，。；：、（）()【】★]", "", s["scene"] + s["ref"])
+    if ("白屏" in P_blank) or ("黑屏" in P_blank) or ("字幕" in P_blank):
+        R.append(("I", "假漂移", "白屏/黑屏字幕镜：画面文字是内容，非泄漏"))
+    if ("校名" in P_blank) or ("校牌" in P_blank):
+        R.append(("I", "假漂移", "校名牌镜：参考图固有文字，见 README §6.9b"))
 
     # ── E. 参考图 ──
     names = " ".join(os.path.basename(r).lower() for r in t["refs"] if r)
@@ -265,7 +298,7 @@ def evaluate(n, s, t):
     return R
 
 
-LEVEL_MARK = {"D": "🔴漂移", "W": "⚠️存疑"}
+LEVEL_MARK = {"D": "🔴漂移", "W": "⚠️存疑", "I": "ℹ️已知假漂移"}
 
 
 def main():
@@ -301,24 +334,29 @@ def main():
         print("  ⚠️ 脚本多镜：%s" % extra)
 
     keys = only if only else sorted(sb)
-    rep, cnt = [], {"D": 0, "W": 0, "clean": 0}
+    rep, cnt = [], {"D": 0, "W": 0, "clean": 0, "I": 0}
     for n in keys:
         R = evaluate(n, sb[n], tk.get(n))
+        # ★ I 级 = 已知假漂移（白屏/黑屏字幕镜、校名牌镜）：**不影响结论分档**，
+        #   但仍列出供阅读者知道"这镜命中扫描器是预期的"。
         if any(x[0] == "D" for x in R):
             cnt["D"] += 1
-        elif R:
+        elif any(x[0] == "W" for x in R):
             cnt["W"] += 1
         else:
             cnt["clean"] += 1
+        if any(x[0] == "I" for x in R):
+            cnt["I"] += 1
         if R and (not only_drift or any(x[0] == "D" for x in R)):
             rep.append((n, R))
 
     L = ["# ★ 全片分镜一致性审核（storyboard.md ↔ 生产脚本 TASKS）", "",
-         "校验：A 时长 / B 景别 / C 运镜 / D 台词 / E 参考图 / F 画面文字风险", "",
+         "校验：A 时长 / B 景别 / C 运镜 / D 台词 / E 参考图 / F 画面文字风险 / G 假漂移识别", "",
          "| 结论 | 镜数 |", "|---|:--:|",
          "| ✅ 完全一致 | %d |" % cnt["clean"],
          "| ⚠️ 存疑（需人工确认） | %d |" % cnt["W"],
          "| 🔴 漂移（须修复） | %d |" % cnt["D"],
+         "| ℹ️ 属于已知假漂移（不计入上三档） | %d |" % cnt["I"],
          "| **合计** | **%d** |" % len(keys), ""]
     if missing:
         L += ["**脚本缺镜：** %s" % missing, ""]
@@ -338,8 +376,8 @@ def main():
 
     dst = os.path.join(OUT, "_storyboard_audit.md")
     open(dst, "w", encoding="utf-8").write("\n".join(L))
-    print("\n✅ 完全一致 %d ｜ ⚠️ 存疑 %d ｜ 🔴 漂移 %d"
-          % (cnt["clean"], cnt["W"], cnt["D"]))
+    print("\n✅ 完全一致 %d ｜ ⚠️ 存疑 %d ｜ 🔴 漂移 %d ｜ ℹ️ 已知假漂移 %d"
+          % (cnt["clean"], cnt["W"], cnt["D"], cnt["I"]))
     print("   报告：%s" % dst)
     return 0
 
