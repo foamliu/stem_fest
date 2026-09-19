@@ -276,13 +276,13 @@ def evaluate(n, s, t):
     #   不能当作「字幕泄漏」处置（README §6.10.2 两类假漂移）：
     #     ① 白屏日记字镜（46/74/105）：白底黑字卡片 —— 字是**内容**不是泄漏
     #     ② 黑屏字幕镜：黑底白字
-    #     ③ 校名牌镜（镜 1）：参考图里本来就有校名（§6.9b）
+    #     ③ 校名牌镜（镜 1）：参考图里本来就有校名（§6.9）
     #   ⇒ 标记出来，供人工复核时跳过；**不产生 D 级告警**。
     P_blank = re.sub(r"[\s，。；：、（）()【】★]", "", s["scene"] + s["ref"])
     if ("白屏" in P_blank) or ("黑屏" in P_blank) or ("字幕" in P_blank):
         R.append(("I", "假漂移", "白屏/黑屏字幕镜：画面文字是内容，非泄漏"))
     if ("校名" in P_blank) or ("校牌" in P_blank):
-        R.append(("I", "假漂移", "校名牌镜：参考图固有文字，见 README §6.9b"))
+        R.append(("I", "假漂移", "校名牌镜：参考图固有文字，见 README §6.9"))
 
     # ── E. 参考图 ──
     names = " ".join(os.path.basename(r).lower() for r in t["refs"] if r)
