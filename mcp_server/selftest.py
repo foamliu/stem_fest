@@ -3,7 +3,7 @@
 """MCP 服务器离线自检 —— 不需要 ComfyUI 在线。
 
 校验两件事：
-  1. 15 个工具均已注册到 FastMCP（12 条工作流 + 3 个辅助工具）
+  1. 17 个工具均已注册到 FastMCP（14 条工作流 + 3 个辅助工具）
   2. 每条工作流的参数注入落到了正确的节点上（拦截 `_queue` 检查提交的 workflow）
 
 用法::
@@ -83,10 +83,11 @@ def main() -> int:
         "image_segmentation_sam3",
         "qwen3_asr", "qwen3_tts", "sound_caption", "stable_audio_3_sfx",
         "video_minimax_h3_i2v", "video_minimax_h3_r2v",
-        "video_minimax_h3_t2v", "z_image_turbo_t2i",
+        "video_minimax_h3_t2v", "woosh_sfx", "woosh_v2a", "z_image_turbo_t2i",
     ]
-    _check("工具数量 = 15（FireRed 已移除；2026-09-16 新增 stable_audio_3_sfx / sound_caption / face_feature）",
-           len(tools) == 15,
+    _check("工具数量 = 17（FireRed 已移除；2026-09-16 新增 stable_audio_3_sfx / sound_caption / "
+           "face_feature；2026-09-20 新增 woosh_sfx / woosh_v2a）",
+           len(tools) == 17,
            f"实际 {len(tools)}: {tools}")
     for name in expected:
         _check(f"已注册 {name}", name in tools)
@@ -288,6 +289,94 @@ def main() -> int:
            and face["min_det_score"] == 0.4 and face["reembed_px"] == 512 and face["max_images"] == 32, str(face)[:300])
     _check("项目相对路径已转成绝对路径（节点才能读盘）",
            "ASSETS" in face["paths"] and ":\\" in face["paths"], face["paths"][:200])
+
+    # 4f. Sony Woosh 音效（2026-09-20）：专用音效基础模型 · DFlow 蒸馏 4 步
+    print("\n[4f] woosh_sfx")
+    res, wf = call(srv.woosh_sfx,
+                   prompt="sportscar engine revving and driving away quickly",
+                   duration=5.0, model="dflow", seed=9001,
+                   filename_prefix="sfx/selftest_woosh")
+    _check("提交成功且回传 seed", res.get("ok") is True and res.get("seed") == 9001,
+           str(res)[:200])
+    _check("duration → latent_frames（100 帧 ≈ 1 s @48 kHz）",
+           res.get("latent_frames") == 500 and res.get("duration_sec") == 5.0,
+           str(res)[:200])
+    ld = inputs_of(wf, "WooshLoadFlow")[0]
+    _check("WooshLoadFlow 选中 Woosh-DFlow 且 model_type 匹配",
+           ld["model_name"] == "Woosh-DFlow" and ld["model_type"] == "DFlow", str(ld))
+    sm = inputs_of(wf, "WooshSample")[0]
+    _check("prompt/steps/cfg/seed/latent_frames 注入 WooshSample"
+           "（steps=0/cfg=-1 → 官方 DFlow 4 步 / cfg 3.5）",
+           sm["prompt"] == "sportscar engine revving and driving away quickly"
+           and sm["steps"] == 4 and sm["cfg"] == 3.5 and sm["seed"] == 9001
+           and sm["latent_frames"] == 500 and sm["subprocess"] is True,
+           str(sm)[:300])
+    _check("SaveAudioMP3 接的是输出槽 1（audio；槽 0 是 V2A 的 video_frames）",
+           inputs_of(wf, "SaveAudioMP3")[0]["audio"] == ["2", 1],
+           str(inputs_of(wf, "SaveAudioMP3")))
+    _check("SaveAudioMP3 前缀注入",
+           inputs_of(wf, "SaveAudioMP3")[0]["filename_prefix"] == "sfx/selftest_woosh")
+
+    _, wf = call(srv.woosh_sfx, prompt="piano note", duration=1.0, model="flow")
+    sm = inputs_of(wf, "WooshSample")[0]
+    _check("model='flow' → Woosh-Flow/Flow + 官方 50 步 / cfg 4.5",
+           inputs_of(wf, "WooshLoadFlow")[0]["model_name"] == "Woosh-Flow"
+           and sm["steps"] == 50 and sm["cfg"] == 4.5 and sm["latent_frames"] == 100,
+           str(sm)[:200])
+
+    res, _ = call(srv.woosh_sfx, prompt="x", model="bogus")
+    _check("非法 model 值被直接拒绝（不提交）",
+           res.get("ok") is False and "model" in str(res), str(res)[:200])
+
+    # 4g. Sony Woosh 视频配音效（V2A · 2026-09-20）
+    print("\n[4g] woosh_v2a")
+    _VIDEO_FIXTURE.parent.mkdir(parents=True, exist_ok=True)
+    _VIDEO_FIXTURE.write_bytes(b"\x00\x00\x00\x18ftypmp42")   # 占位内容（工具只校验存在）
+    try:
+        res, wf = call(srv.woosh_v2a, video="OUTPUT/_selftest_clip.mp4",
+                       prompt="footsteps on gravel, distant wind",
+                       duration=8.0, model="dvflow", seed=9101,
+                       filename_prefix="sfx/selftest_v2a")
+        _check("提交成功且回传 seed / video_input",
+               res.get("ok") is True and res.get("seed") == 9101
+               and res.get("video_input", "").endswith("_selftest_clip.mp4"),
+               str(res)[:250])
+        _check("duration 8.0 → latent_frames 800（100 帧 ≈ 1 s @48 kHz）",
+               res.get("latent_frames") == 800 and res.get("duration_sec") == 8.0,
+               str(res)[:200])
+        _check("WooshLoadFlow 选中 Woosh-DVFlow-8s 且 model_type 匹配",
+               inputs_of(wf, "WooshLoadFlow")[0]["model_name"] == "Woosh-DVFlow-8s"
+               and inputs_of(wf, "WooshLoadFlow")[0]["model_type"] == "DVFlow")
+        lv = inputs_of(wf, "WooshLoadVideo")[0]
+        _check("video_path 已转绝对路径且 max_duration_s 注入",
+               ":\\" in lv["video_path"] and lv["video_path"].endswith("_selftest_clip.mp4")
+               and lv["max_duration_s"] == 8.0, str(lv)[:200])
+        sm = inputs_of(wf, "WooshSample")[0]
+        _check("WooshSample 已接上 video（触发 V2A 自动切换）+ 参数注入",
+               sm["video"] == ["1", 0] and sm["steps"] == 4 and sm["cfg"] == 3.5
+               and sm["latent_frames"] == 800 and sm["seed"] == 9101,
+               str(sm)[:300])
+        _check("SaveAudioMP3 取输出槽 1（audio）",
+               inputs_of(wf, "SaveAudioMP3")[0]["audio"] == ["3", 1],
+               str(inputs_of(wf, "SaveAudioMP3")))
+
+        _, wf = call(srv.woosh_v2a, video="OUTPUT/_selftest_clip.mp4",
+                     prompt="wind", duration=20.0, model="vflow")
+        sm = inputs_of(wf, "WooshSample")[0]
+        _check("model='vflow' → Woosh-VFlow-8s/VFlow + 官方 50 步 / cfg 4.5",
+               inputs_of(wf, "WooshLoadFlow")[0]["model_name"] == "Woosh-VFlow-8s"
+               and sm["steps"] == 50 and sm["cfg"] == 4.5, str(sm)[:200])
+        _check("duration 超 8 s 被夹到 8 s（VFlow-8s 档上限）",
+               sm["latent_frames"] == 800, str(sm)[:200])
+
+        res, _ = call(srv.woosh_v2a, video="OUTPUT/_no_such_clip.mp4", prompt="x")
+        _check("不存在的视频路径被直接拒绝（不提交）",
+               res.get("ok") is False and "不存在" in str(res), str(res)[:200])
+    finally:
+        try:
+            _VIDEO_FIXTURE.unlink()
+        except Exception:
+            pass
 
     # 5. ACE-Step
     print("\n[5] ace_step_t2audio")

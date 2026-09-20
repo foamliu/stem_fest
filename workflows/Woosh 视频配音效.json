@@ -1,0 +1,32 @@
+{
+  "1": {
+    "inputs": { "video_path": "", "max_duration_s": 8.0 },
+    "_meta": { "title": "载入视频（节点在本机执行，可直接给绝对路径）" },
+    "class_type": "WooshLoadVideo"
+  },
+  "2": {
+    "inputs": { "model_name": "Woosh-DVFlow-8s", "model_type": "DVFlow" },
+    "_meta": { "title": "Woosh 生成模型（视频→音频 蒸馏版 · 4 步）" },
+    "class_type": "WooshLoadFlow"
+  },
+  "3": {
+    "inputs": {
+      "gen_model": ["2", 0],
+      "video": ["1", 0],
+      "prompt": "footsteps on gravel, distant wind",
+      "steps": 4,
+      "cfg": 3.5,
+      "seed": 12345,
+      "latent_frames": 801,
+      "subprocess": true,
+      "force_offload": false
+    },
+    "_meta": { "title": "Woosh 采样器（接上 video 即自动切 V2A，latent_frames 自动 501→801）" },
+    "class_type": "WooshSample"
+  },
+  "4": {
+    "inputs": { "audio": ["3", 1], "filename_prefix": "sfx/woosh_v2a", "quality": "V0" },
+    "_meta": { "title": "保存 MP3（audio 在输出槽 1）" },
+    "class_type": "SaveAudioMP3"
+  }
+}

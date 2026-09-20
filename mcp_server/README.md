@@ -5,12 +5,12 @@
 
 | 服务器 | 名称 | 工具数 | 作用 | 依赖 |
 |--------|------|:------:|------|------|
-| `comfyui_mcp_server.py` | `comfyui-drama` | 15 | 驱动本机 ComfyUI 跑 12 条工作流 | ComfyUI 在线 + 模型就位 |
+| `comfyui_mcp_server.py` | `comfyui-drama` | 17 | 驱动本机 ComfyUI 跑 14 条工作流 | ComfyUI 在线 + 模型就位 |
 | `web_search_mcp_server.py` | `web-search` | 6 | 免 API Key 联网搜索/抓正文 | 仅需 `ddgs`（免密钥） |
 
 ```
 mcp_server/
-├── comfyui_mcp_server.py     # ① 短剧生产管线（图像/视频/语音/音乐）
+├── comfyui_mcp_server.py     # ① 短剧生产管线（图像/视频/语音/音乐/音效）
 ├── selftest.py               #    离线自检（无需 ComfyUI）
 ├── comfyui_tools.md          #    ① 详解：工具清单、参数注入、实测耗时、已知约束
 ├── web_search_mcp_server.py  # ② 联网搜索（免密钥）
@@ -135,7 +135,7 @@ OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
 
 ## 3. 工具索引
 
-### ① comfyui-drama — 生产管线（15 个）
+### ① comfyui-drama — 生产管线（17 个）
 
 | 工具 | 工作流 | 用途 |
 |------|--------|------|
@@ -149,6 +149,8 @@ OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
 | 🆕 `stable_audio_3_sfx` | `Stable Audio 3 音效生成.json` | **音效 / foley / 环境底噪**（LCM 8 步，单次音效比 ACE 更合适） |
 | 🆕 `sound_caption` | `Sound Caption (LAION Whisper).json` | **音效描述**（听到什么 / 音色 / 疑似来源；≤30 s，**无 ASR 能力**） |
 | 🆕 `face_feature` | `Face Feature (InsightFace).json` | **人脸检测 + ArcFace 512 维特征**（目录/通配符批量，可与定妆照比对） |
+| 🆕🆕 `woosh_sfx` | `Woosh 音效生成.json` | **文生音效**：Sony Woosh 音效基础模型（DFlow 蒸馏 4 步 / CFG 3.5） |
+| 🆕🆕 `woosh_v2a` | `Woosh 视频配音效.json` | **视频 → 音效**：给**已拍好的画面**配 foley（≤8 s）★ 本机独门 |
 | `qwen3_asr` | `Qwen3-ASR 语音识别.json` | 配音核对（mp4 音轨 → 文字）<br>★ **词级时间戳**节点已支持（`Qwen3-ForcedAligner-0.6B`），**工具未接线** → `comfyui_tools.md` §6.7 |
 | `image_segmentation_sam3` | `Image Segmentation (SAM3).json` | **开放词汇检测 / 分割**（图片或视频抽帧 → 框图 + 掩膜 + 覆盖率，验收用） |
 | `comfyui_status` | — | 服务 / 队列 / 显存 / 工作流文件检查 |
@@ -160,6 +162,13 @@ OUTPUT_ROOT  : E:\code\stem_fest\OUTPUT
 > —— **新增自定义节点后必须重启一次 ComfyUI** 才会注册（重启会中断正在跑的队列任务）。
 > 冒烟测试（直连 ComfyUI，不经 MCP 服务）：`py -3.10 OUTPUT/_smoke_new_tools.py`
 > （可加 `--only=sfx|caption|face` 单跑一条）。
+>
+> 🆕🆕 = **2026-09-20 新增**（Sony Woosh 音效基础模型，T2A + V2A）。
+> 依赖 `hydra-core / torchdiffeq / timm / hear21passt==0.0.26`（已装进 ComfyUI venv）
+> ＋ 权重 8 个文件夹放在 **`models/woosh/` 直属层**（⚠️ 不能多套一层 `checkpoints/`），
+> **装完必须重启 ComfyUI**；端到端验收脚本 `py -3.10 OUTPUT/_verify_woosh_after_restart.py`。
+> **全片音效批量生产**：`py -3.10 OUTPUT/_make_film_sfx.py`（逐镜铺位见 `storyboard.md`「音效铺位」）。
+> 铁律与踩坑（V2A 跟画面走、audio 在输出槽 1、HF 镜像不可用等）→ `comfyui_tools.md` **§6.9**。
 
 → 详见 **[comfyui_tools.md](comfyui_tools.md)**
 

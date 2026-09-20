@@ -1,0 +1,26 @@
+{
+  "1": {
+    "inputs": { "model_name": "Woosh-DFlow", "model_type": "DFlow" },
+    "_meta": { "title": "Woosh 生成模型（Sony · DFlow 蒸馏 · 4 步）" },
+    "class_type": "WooshLoadFlow"
+  },
+  "2": {
+    "inputs": {
+      "gen_model": ["1", 0],
+      "prompt": "sportscar engine revving and driving away quickly",
+      "steps": 4,
+      "cfg": 3.5,
+      "seed": 12345,
+      "latent_frames": 501,
+      "subprocess": true,
+      "force_offload": false
+    },
+    "_meta": { "title": "Woosh 采样器（T2A · latent_frames 100 ≈ 1 s @48 kHz）" },
+    "class_type": "WooshSample"
+  },
+  "3": {
+    "inputs": { "audio": ["2", 1], "filename_prefix": "sfx/woosh", "quality": "V0" },
+    "_meta": { "title": "保存 MP3（注意：audio 在输出槽 1，槽 0 是 video_frames）" },
+    "class_type": "SaveAudioMP3"
+  }
+}

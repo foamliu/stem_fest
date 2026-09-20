@@ -12,5 +12,10 @@
     },
     "class_type": "InsightFaceFeature",
     "_meta": { "title": "人脸检测 + ArcFace 特征（结果以 JSON text 回传）" }
+  },
+  "2": {
+    "inputs": { "source": ["1", 0] },
+    "class_type": "PreviewAny",
+    "_meta": { "title": "文本回传（必需：把 JSON 落进 history.outputs.text）" }
   }
 }

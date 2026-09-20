@@ -1,7 +1,8 @@
 # comfyui-drama MCP 服务器 · 短剧生产管线
 
-把 `workflows/` 下的 9 条 ComfyUI 工作流封装成 MCP 工具，让 Cline 直接驱动出图 / 出视频 /
-配音 / 配乐 / **检测分割**，而无需手写一次性 Python 脚本。
+把 `workflows/` 下的 14 条 ComfyUI 工作流封装成 MCP 工具，让 Cline 直接驱动出图 / 出视频 /
+配音 / 配乐 / **音效** / **视频配音效** / **音频理解** / **检测分割** / **人脸测量**，
+而无需手写一次性 Python 脚本。
 
 > 🚫 **2026-09-13 变更：`image_edit_firered` 工具已整体移除**（连带 `WORKFLOWS["firered"]` 注册项与
 > `selftest.py` 的 `[3b]` 用例）。该模型在本机 **5 次运行 5 张纯黑图（mean=0.0）、零成功率**，
@@ -26,8 +27,13 @@
 | `video_minimax_h3_t2v` | `video_minimax_h3_t2v.json` | 文生视频（UI 动画 / 无角色镜头） |
 | `qwen3_tts` | `Qwen3-TTS 语音合成.json` | 角色配音 / 旁白（FLAC/MP3） |
 | `ace_step_t2audio` | `ACE-Step 1.5 文生音频.json` | 配乐 BGM / 合成音效（MP3） |
+| `stable_audio_3_sfx` | `Stable Audio 3 音效生成.json` | **文生音效 / foley / 氛围底噪**（1–60 s，LCM 8 步 / CFG 1）★ **音效层首选** |
+| `woosh_sfx` | `Woosh 音效生成.json` | **文生音效**（Sony Woosh 音效基础模型 · DFlow 蒸馏 4 步 / CFG 3.5）★ 音效层备选 |
+| `woosh_v2a` | `Woosh 视频配音效.json` | **视频 → 音效**（按画面配 foley，≤8 s）★ 本机**唯一**能给已拍画面配色效的工具 |
 | `qwen3_asr` | `Qwen3-ASR 语音识别.json` | 配音核对（mp4 音轨 → 文字）<br>★ **词级时间戳**：节点原生支持（`Qwen3-ForcedAligner-0.6B`），但**工具尚未接线** → §6.7 |
+| `sound_caption` | `Sound Caption (LAION Whisper).json` | **音效验收**：音频（含 mp4 音轨）→ 英文声音描述（"听到了什么/什么音色/像什么来源"）<br>⚠️ **无 ASR 能力**，台词转写请用 `qwen3_asr`；单次输入上限 30 s |
 | `image_segmentation_sam3` | `Image Segmentation (SAM3).json` | **开放词汇检测 / 分割**：文字 → 框图 + 掩膜 + 覆盖率；**图片或视频抽帧**（验收用） |
+| `face_feature` | `Face Feature (InsightFace).json` | **人脸检测 + ArcFace 512 维特征**（一次可跑目录 / 通配符 / 多路径整批）<br>⚠️ 绝对余弦相似度不可当判据，只看**相对排名 + 明显差距**（项目 `README.md` §6.5） |
 | `comfyui_status` | — | 服务 / 队列 / 显存 / 工作流文件检查 |
 | `comfyui_upload_image` | — | 上传参考图到 ComfyUI `input` |
 | `comfyui_get_result` | — | 按 `prompt_id` 取回异步结果 |
@@ -70,7 +76,7 @@
 python mcp_server/selftest.py
 ```
 
-离线运行，校验 12 个工具是否注册、以及每条工作流的参数是否注入到正确节点
+离线运行，校验 **17 个工具（14 条工作流 + 3 个辅助）** 是否注册、以及每条工作流的参数是否注入到正确节点
 （拦截 `_queue` 检查提交的 workflow，不依赖 ComfyUI 服务）。
 
 ---
@@ -151,6 +157,8 @@ python mcp_server/selftest.py
 | SAM3 视频抽帧依赖系统 ffmpeg | 抽帧用 `ffmpeg`（时长用 `ffprobe`，失败回退解析 stderr）；缺 ffmpeg 时**只能传图片** | 与 `OUTPUT/_visual_review.py` 同口径 |
 | ★ **`mask_coverage = 0` 就是"没检出"** | 不要只看 ComfyUI 报 `success`（同 FireRed 教训）；覆盖率由 ffmpeg 解灰度裸流数非零像素得到，**不引 PIL/numpy** | 项目 `README.md` §6.1 #6 |
 | SAM3 权重 / 节点 | `models/checkpoints/sam3.1_multiplex_fp16.safetensors`（1.6 GB，本机已就位）+ ComfyUI 内置节点 `SAM3_Detect` / `MaskToImage` / `DrawBBoxes` | `E:\code\ComfyUI\comfy_extras\nodes_sam3.py` |
+| ★ **`filename_prefix` 里的斜杠不会建目录** | 工具把产物**平铺**下载进 `output_dir`（`_save_outputs()` 用 `out_dir / filename`，**丢弃** ComfyUI 的 `subfolder`）。想要子目录请**显式给 `output_dir`**，不要写 `filename_prefix="sfx/film/xxx"` | `mcp_server/comfyui_mcp_server.py::_save_outputs` · 2026-09-20 `_make_film_sfx.py` 踩到 |
+| 音效任务会与渲染**抢单队列** | ComfyUI 是单队列 FIFO：批量音效要在镜头批量之间排队（单条 15–45 s）。**一次只提交一条**最礼貌 | 2026-09-20 `_make_film_sfx.py` |
 
 ---
 
@@ -279,6 +287,203 @@ hf download Qwen/Qwen3-ForcedAligner-0.6B --local-dir E:\code\ComfyUI\models\Qwe
 
 ---
 
+## 6.8 ★ `stable_audio_3_sfx`：点状音效 / foley（2026-09-20 实测接线）
+
+> 与 `ace_step_t2audio` 的**分工**：**长氛围 L2 / 群杂 L3 仍按 `README.md` §4.4 用 ACE-Step**；
+> 本工具管**点状音效 / foley**（一声纸飞机掠过、一次翻书、一记铁锹落地）与**短氛围片段**，
+> 它不需要歌词、不吃 BPM、1–60 s 直接给定，配方比 ACE-Step 干净。
+
+**本机模型就位情况**（ComfyUI 侧，2026-09-20 核实）
+
+| 文件 | 位置 | 用途 |
+|---|---|---|
+| `stable_audio_3_medium.safetensors`（8.6 GB） | `models/checkpoints/` | MODEL + VAE（`CheckpointLoaderSimple`） |
+| `t5gemma_b_b_ul2.safetensors`（1.1 GB） | `models/text_encoders/` | 文本编码器，`CLIPLoader.type = "stable_audio"` |
+
+**清单式的 API 工作流**（`workflows/Stable Audio 3 音效生成.json`，8 节点 / 已跑通）：
+
+```
+CheckpointLoaderSimple ─┬─ MODEL ─→ KSampler(lcm / 8 步 / CFG 1 / simple)
+CLIPLoader(stable_audio)─→ CLIPTextEncode(正) ─┘
+                          CLIPTextEncode(负) ─┘
+EmptyLatentAudio(seconds) ─→ latent ─┘
+CheckpointLoaderSimple.VAE ─→ VAEDecodeAudio ─→ SaveAudioMP3(quality=V0)
+```
+
+**实测（2026-09-20，RTX 4090 Laptop 16GB）**
+
+| 项 | 值 |
+|---|---|
+| prompt | `short punchy sound effect of a paper airplane whooshing past close to the microphone, clean studio recording, no music` |
+| 参数 | `duration=3` · `seed=4242` · `steps=8` · `cfg=1.0` · `lcm/simple` |
+| 产物 | `OUTPUT/sfx/_mcp_probe_paperplane_00001.mp3`（86.1 KB，MP3 48 kHz） |
+| 耗时 | **12.1 s**（含冷加载）⇒ 约 **4 s 机时 / 1 s 音频** |
+
+**照抄配方（英文，讲究「声源 + 动作 + 材质/空间 + 质感」）**
+
+```
+short punchy sound effect of <声源> <动作> <材质/空间>, clean studio recording, no music
+```
+
+| 目标 | prompt |
+|---|---|
+| 纸飞机掠过 | `short punchy sound effect of a paper airplane whooshing past close to the microphone, clean studio recording, no music` |
+| 铁锹入土 | `single shovel thrust into wet soil, dull thud with grit, close perspective, outdoor field recording, no music` |
+| 翻书页 | `single page of a textbook being turned, crisp paper friction, quiet classroom, close-up, no music` |
+| 稻浪夜虫 | `night rice field ambience, wind through wet leaves, distant crickets, low level, natural field recording` |
+
+> ⚠️ 负向词在工作流里走**独立 `CLIPTextEncode`**（`negative_prompt` 参数），但实际采样用
+> `cfg=1.0` ⇒ **负向条件被完全置零**（LCM 配方），想"排掉音乐"要写进**正向**的 `no music`。
+> 与 `z_image_turbo_t2i` 把负面词拼进正向是同一个道理。
+
+**验收（★ 必做，别只看 ComfyUI 报 success）**：拿产物跑 `sound_caption`
+
+| 探针产物 | `sound_caption` 回读（节选） | 判定 |
+|---|---|---|
+| `_mcp_probe_paperplane_00001.mp3` | "a single, sharp, and loud sound … percussive … distinct metallic quality" | ✅ 确为**单次点状音效**（不是音乐、不是持续噪音） |
+
+> 📖 `sound_caption` 的判读口径：它**只描述声音本身**（"the audio features …" 是模型训练风格，不是错误），
+> **没有 ASR 能力** —— 台词核对一律用 `qwen3_asr`。
+
+### ⛔ 铁律：审计类节点的 JSON 必须经 `PreviewAny` 才能回传
+
+**踩坑（2026-09-20 发现并修复）**：`LAIONAudioCaption` / `InsightFaceFeature` 两个自定义节点
+把结果按 `(text, {"ui": {"text": [text]}})` 返回 —— **ComfyUI 0.33 的
+`execution.py::get_output_from_returns()` 只认 `{"ui": …, "result": …}` 这种 dict 形式**，
+元组里的 `ui` 会被**静默丢弃**：`history.outputs` 为空 ⇒ 工具返回
+`status: "no_output_files"` 且**没有任何正文**，而 ComfyUI 依然报 `success`
+（★ 与 FireRed「报 success 但产物是黑图」同一类陷阱）。
+
+**修法（已落地，无需重启 ComfyUI）**：在两条工作流里各挂一个 ComfyUI 内置节点
+`PreviewAny`（`comfy_extras/nodes_preview_any.py`，它用的正是 `{"ui": …, "result": …}` 的正确写法）：
+
+```
+"Sound Caption (LAION Whisper).json":  "3": PreviewAny.source ← ["2", 0]
+"Face Feature (InsightFace).json":     "2": PreviewAny.source ← ["1", 0]
+```
+
+`history.outputs` 随即出现 `text_inline`，MCP 侧 `_collect_outputs()` 命中
+`nd["text"]` → `_hoist_inline_text()` 解析成 `caption_json` / `face_json`。
+
+> ✅ **回归验证（2026-09-20）**：`sound_caption` → `status: success` + `caption_json` 有正文（12.1 s）；
+> `face_feature`（定妆照 `liu_siqi_hero_v01.png`）→ `status: success` + `face_json`（2 张脸、含 512 维特征，15.1 s）。
+> ⚠️ 改工作流 JSON **不需要重启 MCP / ComfyUI**（`_load_workflow()` 每次调用都读盘）。
+
+### 音效模型盘点（2026-09-20 复查 · `E:\code\ComfyUI\models`）
+
+| 模型 | 权重 | 节点 | 结论 |
+|---|---|:--:|---|
+| **Stable Audio 3 Medium** | ✅ 已就位 | ✅ 内置 | **✅ 可用（`stable_audio_3_sfx`）** |
+| **ACE-Step 1.5** | ✅ 已就位 | ✅ 内置 | **✅ 可用（`ace_step_t2audio`，L2/L3）** |
+| **Sony Woosh**（音效基础模型 · T2A + **V2A**） | ✅ 已就位（5 个文件夹 8.3 GB 权重） | ✅ 已加载 | **✅ 可用（`woosh_sfx` / `woosh_v2a`）** |
+| HunyuanVideo Foley | ✅ `models/hunyuanvideo_foley/`（9.8 GB + VAE） | ❌ 无 | 🚫 **不可用**：全机 76 个节点类里没有任何 Foley 节点，也无对应自定义节点包 |
+
+> 📌 分工：**`stable_audio_3_sfx` 仍是音效首选**（1–60 s 任意时长、12 s 出片）；
+> `woosh_sfx` 是专用音效基础模型的备选（语义更"物件化"）；
+> **`woosh_v2a` 是唯一能给已拍画面配 foley 的工具**（≤8 s）；
+> `ace_step_t2audio` 继续承担长氛围 L2 与群杂 L3（见 §6.5）。
+
+---
+
+## 6.9 ★ Sony Woosh 接线（2026-09-20 实测落地）
+
+**为什么值得接**：Woosh 是 Sony 的**音效专用**基础模型（arXiv 2502.07359），本机同一套权重
+既能 T2A（文生音效）也能 **V2A（视频→音效）** —— 后者是本机**唯一**"看着画面配音效"的能力。
+
+### 落地清单（照此复现，全部已验证）
+
+| 步骤 | 内容 | 备注 |
+|---|---|---|
+| ① 装依赖 | `hydra-core` `torchdiffeq` `timm` `hear21passt==0.0.26`（装进 `E:\code\ComfyUI\venv`） | `pip install --dry-run` 先确认**不动 torch/torchvision**；实测只装了这 4 个 |
+| ② 下权重 | HF `drbaph/Woosh` → `models/woosh/`（脚本 `OUTPUT/_fetch_woosh.py`） | 4 个主干 + 已有 4 个组件，**合计 8 个文件夹** |
+| ③ 重启 ComfyUI | 自定义节点只在启动时 import | 生产渲染期间用 `OUTPUT/_restart_comfyui_when_idle.ps1` 等空闲再重启 |
+| ④ 工作流 | `Woosh 音效生成.json`（T2A）· `Woosh 视频配音效.json`（V2A） | API Format，放进 `workflows/` |
+| ⑤ MCP | `woosh_sfx` / `woosh_v2a` | 见 §1 与 §7 |
+
+### ⛔ 铁律 1：Woosh 的模型文件夹必须**直接**放在 `models/woosh/` 下
+
+`folder_paths` 只注册了 `models/woosh` 这一个根（`ComfyUI-Woosh/__init__.py`），而
+`nodes/model_paths.py::resolve_woosh_path()` 只在**根下第一层**找名字：
+
+```
+models/woosh/Woosh-DFlow/{config.yaml,weights.safetensors}   ✅ 能认
+models/woosh/checkpoints/Woosh-DFlow/…                       ❌ 认不到
+```
+
+更要命的是它**不报错**：`Woosh-DFlow/config.yaml` 里写的是 `path: checkpoints/TextConditionerA`，
+节点会用 `resolve_woosh_path("TextConditionerA")` 把它改写成**绝对路径**；若组件被放在
+`checkpoints/` 这一层，改写出来的路径指向不存在的 `models/woosh/TextConditionerA` ⇒
+脚本一跑就"找不到模型"。（本机 2026-09-20 发现：组件原先就在错误的 `checkpoints/` 层，
+已全部上移一层。）
+
+### ⛔ 铁律 2：`WooshSample` 的 **audio 在输出槽 1**，槽 0 是 `video_frames`
+
+T2A 模式下槽 0 会返回一张 **1×1 像素占位图**（`torch.zeros(1,1,1,3)`）——
+把它接到 `SaveImage` 只会得到一张废图。**只接槽 1**：
+
+```
+"SaveAudioMP3".audio ← ["2", 1]     # T2A 工作流，节点 2 = WooshSample
+```
+
+### 参数配方（官方建议值，工具已内置为默认）
+
+| 任务 | checkpoint | `model_type` | steps | cfg | latent_frames |
+|---|---|---|:--:|:--:|---|
+| 文生音效（快） | `Woosh-DFlow` | `DFlow` | **4** | **3.5** | 100 ≈ 1 s @48 kHz |
+| 文生音效（质量） | `Woosh-Flow` | `Flow` | 50 | 4.5 | 同上 |
+| 视频配音效（快） | `Woosh-DVFlow-8s` | `DVFlow` | **4** | **3.5** | 800 ≈ 8 s（V2A 上限） |
+| 视频配音效（质量） | `Woosh-VFlow-8s` | `VFlow` | 50 | 4.5 | 同上 |
+
+> ⚠️ **`model_name` 与 `model_type` 必须配对**，否则节点直接抛
+> `ValueError: Selected model_type 'X' does not match checkpoint 'Y'`（工具已按 model 参数自动配对）。
+> ⚠️ 蒸馏版（DFlow/DVFlow）内部把步数**夹到 ≤8**，填 50 也只会跑 8 步。
+> ⚠️ `subprocess=True`（**工具默认**）：in-process 时 ComfyUI 改过的全局 PyTorch 状态
+> （attention backend / FP16 累加）可能让 Woosh 产出**语义不符**的声音；子进程慢约 15 s 但可靠。
+
+### 📊 V2A 行为实测：**它跟画面走，文字只是弱提示**（2026-09-20 三点探针）
+
+| 输入镜头 | 文字 prompt | `sound_caption` 回读 | 判读 |
+|---|---|---|---|
+| 镜 35 `35_sicheng_nods_we_won`（人物喊话） | `wind over soil and distant footsteps on gravel` | "a single, loud, and sharp **vocal burst** … shout or yell" | ⚠️ 出了**人声**，与文字不符 |
+| 镜 21 `_mid_21_zhang_crouches_looks_at_wild_veg`（人物张口） | `wind over dry soil, faint distant artillery rumble, cloth rustling, **no voices**` | "The audio contains **speech**. The speaker is a male with a medium pitch…" | ⚠️ 仍出人声（写了 `no voices` 也没用） |
+| 镜 4 `04_paper_plane_over_campus`（空镜，无人） | `paper airplane whooshing … light wind, birdsong, no voices` | 音轨已产出（`OUTPUT/sfx/_probe_woosh_v2a_noface_00001.mp3`），回读排在当日渲染之后 | — |
+
+**结论（前两点一致）**：V2A 用 Synchformer 提的**视觉特征**会把"有人在说话/喊"这块压过文字提示
+⇒ 有发声动作的镜头，它**就是要生成语音**。
+
+| 用途 | 怎么做 |
+|---|---|
+| 想配**环境声 / 风声 / 脚步** | **挑画面里没有明显发声动作的镜头**；文字照常给（它仍有微调作用） |
+| 想要**喊话 / 人声类 foley** | 它对路，直接用 |
+| 无论哪种 | **必须回读验收**：判"是不是人声"用 `qwen3_asr`（专测语音）或 `sound_caption`（测音色）—— `status: success` 什么都说明不了 |
+
+> ⚠️ `WooshLoadFlow.model_name` 下拉里还会出现 `Woosh-AE` / `Woosh-CLAP`（上游把
+> `TextConditionerA/V` 之外的东西都列出来了）。**别选这两个**：它们是组件不是生成权重，
+> 选了会在加载时被 `_infer_model_type_from_config()` 拒掉。工具的 `model` 参数已锁定 4 个主干。
+
+### 下载踩坑：**不要用 `HF_ENDPOINT=https://hf-mirror.com`**
+
+本机 `HTTP(S)_PROXY=http://127.0.0.1:7897` 已直通 huggingface.co（实测 200）。
+改用镜像会**必然失败**：hub 0.36 会校验 HEAD 响应头，镜像不返回该头 ⇒
+`FileMetadataError: Distant resource does not seem to be on huggingface.co`
+→ 被包成 `LocalEntryNotFoundError`（看上去像"断网"，其实是头校验没过）。
+`OUTPUT/_fetch_woosh.py` 因此**默认不设** `HF_ENDPOINT`。
+
+### 踩坑：`.ps1` 里写中文 = 语法炸（PowerShell 5.1）
+
+Windows PowerShell 5.1 **没有 BOM 就按 ANSI 解析 `.ps1`**。第一版看门狗脚本带中文注释/日志，
+被解析成一堆碎 token：`Log` 的字符串引号被吃掉、**kill 段被跳过**，结果
+"没杀掉旧进程却又启动了一个新 ComfyUI -> 同端口起两个实例"（当场已清理）。
+⇒ **给 PS 的脚本文件一律纯 ASCII**；写完先跑一次语法校验：
+
+```powershell
+$errs = $null
+$null = [System.Management.Automation.Language.Parser]::ParseFile($p, [ref]$null, [ref]$errs)
+if ($errs) { $errs | ForEach-Object Message } else { 'PARSE OK' }
+```
+
+---
+
 ## 7. 参数注入对照（维护者参考）
 
 | 工作流 | 注入点 |
@@ -293,3 +498,8 @@ hf download Qwen/Qwen3-ForcedAligner-0.6B --local-dir E:\code\ComfyUI\models\Qwe
 | H3 T2V | `MiniMaxH3ImageToVideo.prompt` · 其余同 I2V |
 | SAM3 检测 / 分割 | `LoadImage.image`（图片或抽出的帧）· `CLIPTextEncode.text`（类别）· `SAM3_Detect.threshold/refine_iterations/individual_masks` · `CheckpointLoaderSimple.ckpt_name`（可选）<br>**外加 3 个注入节点**：`PreviewImage→SaveImage(_bbox)` · `SaveImage(_overlay)` ← `ImageAndMaskPreview` 的 composite · `MaskToImage→SaveImage(_mask)` ← `SAM3_Detect` 的 masks |
 | Qwen3-ASR | `Qwen3ASRLoader.repo_id/precision/forced_aligner/local_model_path`（⚠️ `forced_aligner` 目前**写死 `"None"`**，工具未暴露）· `Qwen3ASRTranscribe.language/context/return_timestamps` · `SaveText.text ← ["2", 0]`<br>⚠️ **`timestamps` 在输出槽 `2`，尚未接出**（接法见 §6.7） |
+| Stable Audio 3 音效 | `CLIPTextEncode.text`（节点号升序：正/负）· `EmptyLatentAudio.seconds/batch_size` · `KSampler.seed/steps/cfg/sampler_name/scheduler/denoise` · `SaveAudioMP3.filename_prefix/quality` |
+| Sound Caption | `LoadAudio.audio`（先经 `/upload/image` 注册）· `LAIONAudioCaption.model_dir/processor_dir/max_new_tokens/num_beams` · **`PreviewAny.source ← ["2", 0]`**（见 §6.8 铁律） |
+| Face Feature | `InsightFaceFeature.paths/model_name/provider/det_size/min_det_score/include_embedding/reembed_px/max_images`（节点在本机执行，**项目相对路径直接读盘**，不走上传）· **`PreviewAny.source ← ["1", 0]`** |
+| Woosh 文生音效（T2A） | `WooshLoadFlow.model_name/model_type`（按 `model` 参数配对，见表）· `WooshSample.prompt/steps/cfg/seed/latent_frames/subprocess/force_offload` · `SaveAudioMP3.filename_prefix/quality` ← **`["2", 1]`（audio，不是槽 0）** |
+| Woosh 视频配音效（V2A） | `WooshLoadVideo.video_path/max_duration_s` · `WooshLoadFlow.model_name/model_type` · `WooshSample.prompt/steps/cfg/seed/latent_frames/subprocess/force_offload`（**`video ← ["1", 0]` 是关键：接上即自动切 V2A**）· `SaveAudioMP3` ← `["3", 1]` |

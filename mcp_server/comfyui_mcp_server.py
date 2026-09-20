@@ -15,6 +15,8 @@
     qwen3_tts                Qwen3-TTS 语音合成.json
     ace_step_t2audio         ACE-Step 1.5 文生音频.json
     stable_audio_3_sfx       Stable Audio 3 音效生成.json   ⭐ 音效/氛围首选
+    woosh_sfx                Woosh 音效生成.json          (Sony Woosh 音效基础模型 · DFlow 4 步)
+    woosh_v2a                Woosh 视频配音效.json         (Sony Woosh 视频→音频 · 按画面配色效)
   🔎 识别层
     qwen3_asr                Qwen3-ASR 语音识别.json   (配音核对：mp4 音轨 → 文字)
     sound_caption            Sound Caption (LAION Whisper).json
@@ -82,6 +84,8 @@ WORKFLOWS: dict[str, str] = {
     "h3_r2v": "video_minimax_h3_r2v.json",
     "h3_t2v": "video_minimax_h3_t2v.json",
     "sfx": "Stable Audio 3 音效生成.json",
+    "woosh": "Woosh 音效生成.json",
+    "woosh_v2a": "Woosh 视频配音效.json",
     "caption": "Sound Caption (LAION Whisper).json",
     "face": "Face Feature (InsightFace).json",
 }
@@ -1058,6 +1062,215 @@ def stable_audio_3_sfx(
         })
     except Exception as e:
         return _err(f"stable_audio_3_sfx 失败: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+# 🎧 音效层 · Sony Woosh（专用音效基础模型，T2A）
+# ══════════════════════════════════════════════════════════════════
+# key → (checkpoint 文件夹名, 节点要求的 model_type, 官方建议 steps, 官方建议 cfg)
+WOOSH_MODELS: dict[str, tuple[str, str, int, float]] = {
+    "dflow": ("Woosh-DFlow", "DFlow", 4, 3.5),    # 蒸馏版：4 步，快
+    "flow": ("Woosh-Flow", "Flow", 50, 4.5),      # 基础版：50 步，质量更好
+}
+WOOSH_FRAMES_PER_SEC = 100.0   # 100 latent frames ≈ 1 s @ 48 kHz
+
+
+@mcp.tool()
+def woosh_sfx(
+    prompt: str,
+    duration: float = 5.0,
+    model: str = "dflow",
+    steps: int = 0,
+    cfg: float = -1.0,
+    seed: int = -1,
+    subprocess: bool = True,
+    force_offload: bool = False,
+    quality: str = "V0",
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Sony Woosh 文生音效（工作流 `Woosh 音效生成.json`，专用音效基础模型）。
+
+    与 `stable_audio_3_sfx` 是**同类备选**：两者都做「一句英文声音描述 → 音效」。
+    Woosh 是 Sony 的**音效专用基础模型**（arXiv 2502.07359），同一权重还支持
+    **视频→音频**（VFlow/DVFlow，本工具暂只接 T2A）；
+    需要按画面配 foley 时它的语义更贴，纯氛围底噪两者都可以试。
+
+    Args:
+        prompt: 英文声音描述（与 Stable Audio 同口径：声源 + 动作 + 材质/空间 + 质感），
+            例 `"sportscar engine revving and driving away quickly"`。
+        duration: 时长（秒）；内部换算成 `latent_frames`（100 ≈ 1 s，上限 20 s）。
+        model: `dflow`（蒸馏 · 4 步 · 快，默认）或 `flow`（基础 · 50 步 · 质量更好）。
+            ⚠️ 换 `flow` 前先确认 `models/woosh/Woosh-Flow/` 权重在位。
+        steps: 采样步数；**0 = 按 model 用官方建议值**（dflow 4 / flow 50）。
+            蒸馏模型内部最多只认 8 步，填大也会被夹到 8。
+        cfg: 引导强度；**-1 = 按 model 用官方建议值**（dflow 3.5 / flow 4.5）。
+            ⚠️ 与 Stable Audio 的 LCM 配方不同，这里 cfg 是真生效的。
+        seed: 随机种子；-1 = 随机（会回传实际值，便于复现）。
+        subprocess: 默认 **True**（节点作者建议）：in-process 时 ComfyUI 改过的
+            全局 PyTorch 状态（attention backend / FP16 累加）可能让 Woosh 出**语义
+            不符的声音**；子进程慢约 15 s（重载模型）但结果可靠。
+        force_offload: 出完把模型从显存+内存彻底扔掉，下次重载（省显存，慢）。
+        quality: MP3 质量，V0 / 128k / 320k。
+        filename_prefix: 保存前缀，默认 `sfx/<时间戳>_woosh_<model>`。
+        output_dir: 输出目录，默认 `OUTPUT/sfx`。
+        wait: True 阻塞等待；False 仅提交（用 comfyui_get_result 取回）。
+        timeout_seconds: 等待超时秒数（dflow 短音效通常 20–90 s）。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, duration_sec, latent_frames, files, ...}
+
+    Note:
+        * 输出恒为 **48 kHz** 单声道 MP3（Woosh-AE 的采样率）；
+        * 产物务必用 `sound_caption` 回读验收 —— 音效模型「报 success」不等于
+          「出的是你要的声音」（同 FireRed 教训）。
+    """
+    try:
+        key = (model or "dflow").strip().lower()
+        if key not in WOOSH_MODELS:
+            return _err(f"model 只支持 {sorted(WOOSH_MODELS)}，收到 {model!r}")
+        ckpt, mtype, def_steps, def_cfg = WOOSH_MODELS[key]
+
+        frames = int(round(max(0.1, float(duration)) * WOOSH_FRAMES_PER_SEC))
+        frames = max(1, min(2000, frames))          # 节点上限 2000（≈20 s）
+        steps_used = int(steps) if int(steps) > 0 else def_steps
+        cfg_used = round(float(cfg), 2) if float(cfg) >= 0 else def_cfg
+        seed_used = _pick_seed(seed)
+
+        wf = _load_workflow("woosh")
+        _set_inputs(wf, "WooshLoadFlow", model_name=ckpt, model_type=mtype)
+        _set_inputs(wf, "WooshSample",
+                    prompt=prompt.strip(), steps=steps_used, cfg=cfg_used,
+                    seed=seed_used, latent_frames=frames,
+                    subprocess=bool(subprocess), force_offload=bool(force_offload))
+        prefix = filename_prefix or f"sfx/{_now()}_woosh_{key}"
+        _set_inputs(wf, "SaveAudioMP3", filename_prefix=prefix, quality=quality)
+
+        out_dir = _resolve_output_dir(output_dir, "sfx")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "woosh_sfx",
+            "workflow": WORKFLOWS["woosh"],
+            "model": key,
+            "checkpoint": ckpt,
+            "model_type": mtype,
+            "seed": seed_used,
+            "duration_sec": round(frames / WOOSH_FRAMES_PER_SEC, 2),
+            "latent_frames": frames,
+            "steps": steps_used,
+            "cfg": cfg_used,
+            "subprocess": bool(subprocess),
+            "prompt_chars": len(prompt),
+        })
+    except Exception as e:
+        return _err(f"woosh_sfx 失败: {e}")
+
+WOOSH_V2A_MODELS: dict[str, tuple[str, str, int, float]] = {
+    "dvflow": ("Woosh-DVFlow-8s", "DVFlow", 4, 3.5),   # 蒸馏版：4 步，快
+    "vflow": ("Woosh-VFlow-8s", "VFlow", 50, 4.5),     # 基础版：50 步
+}
+WOOSH_V2A_MAX_SEC = 8.0    # VFlow-8s / DVFlow-8s 权重就是按 8 s 档训练的
+
+
+@mcp.tool()
+def woosh_v2a(
+    video: str,
+    prompt: str,
+    model: str = "dvflow",
+    duration: float = 8.0,
+    steps: int = 0,
+    cfg: float = -1.0,
+    seed: int = -1,
+    subprocess: bool = True,
+    force_offload: bool = False,
+    quality: str = "V0",
+    filename_prefix: Optional[str] = None,
+    output_dir: Optional[str] = None,
+    wait: bool = True,
+    timeout_seconds: int = 1800,
+) -> str:
+    """Sony Woosh **视频→音频**配音效（工作流 `Woosh 视频配音效.json`）。
+
+    **本机唯一能给「已拍好的画面」配色效的工具** —— H3 出的视频自带音轨（且按
+    README §4.4，H3 生成的环境声实测 ≈ −50 dB），要补/替换某镜的 foley 就用它：
+    把成片或镜头 mp4 喂进来，按画面内容描述声音，产出 8 s 内的 48 kHz 单声道 MP3。
+
+    工作流里 `WooshSample` 接上了 `video` 即**自动切 V2A 模式**（无需额外开关）。
+
+    Args:
+        video: 视频路径（项目相对或绝对，如 `OUTPUT/06_trench/shots/s19.mp4`）。
+            节点在本机执行，可**直接读盘**（不走上传）。
+        prompt: 画面里应该有的声音（英文），例
+            `"footsteps on gravel, distant wind and occasional metal clank"`。
+        model: `dvflow`（蒸馏 · 4 步 · 快，默认）或 `vflow`（基础 · 50 步）。
+        duration: 音轨时长（秒）；**上限 8.0**（VFlow-8s 档），超出会被夹到 8。
+        steps: 采样步数；0 = 官方建议（dvflow 4 / vflow 50）。蒸馏模型内部最多 8。
+        cfg: 引导强度；-1 = 官方建议（dvflow 3.5 / vflow 4.5）。
+        seed: 随机种子；-1 = 随机。
+        subprocess: 默认 True（同 `woosh_sfx`：隔离 PyTorch 全局状态，慢约 15 s 但可靠）。
+        force_offload: 出完把模型从显存+内存扔掉（省显存，慢）。
+        quality: MP3 质量，V0 / 128k / 320k。
+        filename_prefix: 保存前缀，默认 `sfx/<时间戳>_woosh_v2a_<model>`。
+        output_dir: 输出目录，默认 `OUTPUT/sfx`。
+        wait: True 阻塞等待；False 仅提交。
+        timeout_seconds: 等待超时秒数。
+
+    Returns:
+        JSON 字符串：{ok, status, prompt_id, seed, video_input, duration_sec,
+        latent_frames, files, ...}
+
+    Note:
+        * 输出是**独立音轨**，不会自动并回视频 —— 要合轨请用 ffmpeg
+          （`-c:v copy` 只换音轨，见项目 README §4.4 的 BGM 混音做法）；
+        * 验收用 `sound_caption` 回读（它没有 ASR 能力，只描述声音本身）。
+    """
+    try:
+        key = (model or "dvflow").strip().lower()
+        if key not in WOOSH_V2A_MODELS:
+            return _err(f"model 只支持 {sorted(WOOSH_V2A_MODELS)}，收到 {model!r}")
+        ckpt, mtype, def_steps, def_cfg = WOOSH_V2A_MODELS[key]
+
+        cand = Path(video)
+        if not cand.is_absolute():
+            cand = PROJECT_ROOT / video
+        if not cand.exists():
+            return _err(f"视频不存在: {cand}")
+        src = str(cand)
+
+        dur = max(1.0, min(WOOSH_V2A_MAX_SEC, float(duration)))
+        frames = max(1, min(2000, int(round(dur * WOOSH_FRAMES_PER_SEC))))
+        steps_used = int(steps) if int(steps) > 0 else def_steps
+        cfg_used = round(float(cfg), 2) if float(cfg) >= 0 else def_cfg
+        seed_used = _pick_seed(seed)
+
+        wf = _load_workflow("woosh_v2a")
+        _set_inputs(wf, "WooshLoadVideo", video_path=src, max_duration_s=dur)
+        _set_inputs(wf, "WooshLoadFlow", model_name=ckpt, model_type=mtype)
+        _set_inputs(wf, "WooshSample",
+                    prompt=prompt.strip(), steps=steps_used, cfg=cfg_used,
+                    seed=seed_used, latent_frames=frames,
+                    subprocess=bool(subprocess), force_offload=bool(force_offload))
+        prefix = filename_prefix or f"sfx/{_now()}_woosh_v2a_{key}"
+        _set_inputs(wf, "SaveAudioMP3", filename_prefix=prefix, quality=quality)
+
+        out_dir = _resolve_output_dir(output_dir, "sfx")
+        return _run(wf, out_dir, wait, timeout_seconds, {
+            "tool": "woosh_v2a",
+            "workflow": WORKFLOWS["woosh_v2a"],
+            "model": key,
+            "checkpoint": ckpt,
+            "model_type": mtype,
+            "video_input": src,
+            "seed": seed_used,
+            "duration_sec": round(frames / WOOSH_FRAMES_PER_SEC, 2),
+            "latent_frames": frames,
+            "steps": steps_used,
+            "cfg": cfg_used,
+            "subprocess": bool(subprocess),
+            "prompt_chars": len(prompt),
+        })
+    except Exception as e:
+        return _err(f"woosh_v2a 失败: {e}")
 
 # ══════════════════════════════════════════════════════════════════
 # 🔎 音频理解层 · 音效描述（LAION Whisper）

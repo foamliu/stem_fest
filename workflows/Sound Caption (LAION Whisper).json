@@ -14,5 +14,10 @@
     },
     "class_type": "LAIONAudioCaption",
     "_meta": { "title": "音效描述 · LAION Whisper（结果以 text 回传）" }
+  },
+  "3": {
+    "inputs": { "source": ["2", 0] },
+    "class_type": "PreviewAny",
+    "_meta": { "title": "文本回传（必需：把 JSON 落进 history.outputs.text）" }
   }
 }
