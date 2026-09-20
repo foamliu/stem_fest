@@ -1,0 +1,4 @@
+现成音源（BGM）放这里 —— 本片用《王菲如願Faye Wong.mp3》。
+★ 媒体文件不入库（.gitignore: audio/*），只保留本目录骨架。
+铺位与逐镜落点：storyboard.md「配乐铺位」（唯一出处）
+混音 / 验收脚本：OUTPUT/_mix_bgm.py · OUTPUT/_verify_bgm_mix.py

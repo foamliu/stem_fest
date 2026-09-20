@@ -20,3 +20,9 @@ ASSETS/**/*.png
 ASSETS/**/*.jpg
 ASSETS/**/*.jpeg
 ASSETS/**/*.webp
+
+# === 现成音源（商业发行曲目，不入库）===
+# 《如愿》等 BGM 是版权作品（仅校内展示，见 storyboard.md「音乐版权标注」），
+# 只入库目录骨架 audio/.gitkeep；铺位口径见 storyboard.md「配乐铺位」。
+audio/*
+!audio/.gitkeep
