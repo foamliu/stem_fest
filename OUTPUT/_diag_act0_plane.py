@@ -339,11 +339,12 @@ TASKS[2] = dict(
 # ── 镜 3 甩纸飞机（中景）──
 TASKS[3] = dict(
     slug="girl_throwing_paper_plane", seed=9103,
-    ref1=G_GIRL_MOTHER, ref2=P_PLANE, dur=3.0,
+    ref1=G_GIRL_MOTHER, ref2=SCENE_GATE, dur=3.0,
     prompt=(
         "CUT 1: 中景镜头。小女孩右手捏着一架白色纸飞机，先凑到嘴边哈了一口气，"
         "然后手臂用力向前一甩，把纸飞机朝校门方向掷出去，动作干脆、表情兴奋；"
-        "母亲站在她身旁看着、含笑（不要让她消失）；纸飞机的形态照 <Picture 2>；"
+        "母亲站在她身旁看着、含笑（不要让她消失）；"
+        "背景是 <Picture 2> 里校门口的大树与街景（树荫浓密、街道开阔），"
         "人物的面貌、发型与服装严格照 <Picture 1>（不要改变长相与年龄）；"
         + LIGHT + "。固定机位，甩手瞬间镜头轻微跟随。\n"
         "Audio: 纸飞机出手时的破风声（后期）；"
@@ -351,16 +352,18 @@ TASKS[3] = dict(
     ),
 )
 
-# ── 镜 4 航拍跟拍纸飞机掠过校园（★ 校园展示镜，7s，T2V）──
+# ── 镜 4 航拍跟拍纸飞机掠过校园（★ 校园展示镜，7s，R2V 接校园图）──
 TASKS[4] = dict(
     slug="paper_plane_over_campus", seed=9104,
-    ref1=None, ref2=None, dur=7.0,
+    ref1=None, ref2=SCENE_CAMPUS, dur=7.0,
     prompt=(
         "CUT 1: 远景航拍跟拍镜头，画面前景是一架正在滑翔的白色纸飞机，"
         "镜头一路跟随它向前飞过学校校园：先掠过操场（有学生在上体育课），"
         "再穿过林荫道（树影斑驳、阳光透过树叶），接着掠过花坛（花正开着），"
         "最后飞向一栋教学楼四楼的窗口。四个地点依次呈现、每个约 1.5-2 秒，"
         "让观众看清校园的操场、林荫道、花坛与教学楼；"
+        "校园的建筑与颜色照 <Picture 1>：那栋教学楼是橙红色外墙配深咖色窗带，"
+        "操场是蓝色的球场与跑道，树木浓绿；"
         + LIGHT + "。镜头持续向前推进，画面持续变化、运动感强。\n"
         + NO_SPEECH
     ),
@@ -575,19 +578,27 @@ def set_inputs(wf, class_type, **values):
 
 
 def build_video_wf(task, ref1_name, ref2_name, megapixels, steps, prefix):
-    """复刻 MCP video_minimax_h3_r2v / t2v 的注入逻辑。"""
+    """复刻 MCP video_minimax_h3_r2v / t2v 的注入逻辑。
+
+    ★ 2026-09-19：判据由「ref1 是否为 None」放宽为「**是否给了任何参考图**」。
+      起因：镜 4 是纯场景镜（无角色 ⇒ ref1=None），但需要接**校园参考图**作 ref2；
+      旧判据只看 ref1 ⇒ 会静默走 T2V 把 ref2 丢掉（等于没接）。现在 ref2 有图即走 R2V。
+    """
     n_load = 0
-    if task["ref1"] is not None:
+    has_any_ref = (task["ref1"] is not None) or (task["ref2"] is not None)
+    if has_any_ref:
         wf = load_workflow(WF_R2V)
         set_inputs(wf, "PrimitiveStringMultiline", value=task["prompt"])
         # LoadImage 节点：按 node id 升序 → ref_image_0 / ref_image_1
         load_nodes = sorted(
             (nid for nid, n in wf.items() if n.get("class_type") == "LoadImage"),
             key=lambda x: int(x))
+        # 注意：R2V 要求两个图位都有值——缺的那位用另一张补，否则节点报错。
+        fill = ref1_name or ref2_name
         if len(load_nodes) >= 1:
-            wf[load_nodes[0]]["inputs"]["image"] = ref1_name
+            wf[load_nodes[0]]["inputs"]["image"] = ref1_name or fill
         if len(load_nodes) >= 2:
-            wf[load_nodes[1]]["inputs"]["image"] = ref2_name or ref1_name
+            wf[load_nodes[1]]["inputs"]["image"] = ref2_name or fill
         kind = "R2V"
         n_load = len(load_nodes)
     else:
@@ -721,8 +732,8 @@ def run_shot(shot, dry=False, megapixels=0.6, steps=20, timeout=3600):
     print("=" * 72)
     print("[镜 %d] %s | seed %d | 时长 %.0fs | %s" % (
         shot, task["slug"], task["seed"], task["dur"],
-        "T2V（无角色）" if task["ref1"] is None else
-        "R2V | <Picture 1> = %s" % os.path.basename(task["ref1"])))
+        "T2V（无参考图）" if (task["ref1"] is None and task["ref2"] is None) else
+        "R2V | <Picture 1> = %s" % os.path.basename(task["ref1"] or task["ref2"])))
     if dry:
         print("  ref2 = %s" % (os.path.basename(task["ref2"]) if task["ref2"] else "-"))
         print("  prompt = %s..." % task["prompt"][:70])
@@ -747,7 +758,7 @@ def run_shot(shot, dry=False, megapixels=0.6, steps=20, timeout=3600):
     wf, kind, n_load = build_video_wf(task, ref1_name, ref2_name,
                                       megapixels, steps, prefix)
     print("  注入：wf=%s kind=%s LoadImage节点=%d megapixels=%.2f steps=%d prompt字数=%d" % (
-        WF_R2V if task["ref1"] is not None else WF_T2V, kind, n_load,
+        WF_R2V if kind == "R2V" else WF_T2V, kind, n_load,
         megapixels, steps, len(task["prompt"])))
 
     t0 = time.time()

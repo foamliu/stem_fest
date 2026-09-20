@@ -36,6 +36,15 @@ ACT = {
 }
 GUARD = "★ 全画面不得"
 
+# ★ 2026-09-19：镜 1 是**全片唯一「必须写对字」的镜**（校名，见 README §6.9 四轮实测）。
+#   它的禁令写法与其它镜**天然不同** —— 不是「全画面不得出现任何可读文字」，
+#   而是「除参考图里已有的这组校名与校徽之外，不得再出现任何其它文字」。
+#   ⇒ 旧闸门拿字面量 GUARD 去比，必然判它「否」；这是**闸门假阴性、不是 prompt 缺陷**
+#     （画面第四轮已抄对，见 §6.9 定版）。故在此登记它的等价守卫句。
+GUARD_ALT = {
+    1: "★ 除参考图里已有的这组校名与校徽之外",
+}
+
 
 def load(mod_file):
     ns = {"__name__": "_m_%s" % mod_file.replace(".", "_")}
@@ -66,11 +75,12 @@ def main():
         lines = [L for L in real.split("\n")]
         nline = len(lines)
         l1, l2 = lines[0], (lines[1] if nline > 1 else "")
-        g_in_l1 = GUARD in l1
+        guard = GUARD_ALT.get(n, GUARD)
+        g_in_l1 = guard in l1
         # 禁令后仍有画面语？（镜 7 的关键特征）
-        tail = l1.split(GUARD)[-1] if g_in_l1 else ""
+        tail = l1.split(guard)[-1] if g_in_l1 else ""
         buffered = len(tail.strip()) >= 6
-        l2_clean = GUARD not in l2
+        l2_clean = guard not in l2
         stars = real.count("**")
         ok = (nline == 2 and g_in_l1 and buffered and l2_clean and stars == 0)
         if not ok:
