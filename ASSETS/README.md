@@ -226,7 +226,7 @@ ASSETS/
 | 03 | `03_classroom_day` | 八（1）班教室（白天） | 5-9 | 下午 | 明亮、白平衡中性 |
 | 04 | `04_classroom_dusk` | 八（1）班教室（傍晚 6 点） | 10-18 | 天还亮着 | 暖金色天光 + 蓝紫冷光 |
 | 05 | `05_classroom_night` | 八（1）班教室（夜） | 106-126 | 现实只过了一小会儿 | 深蓝 + 橙红、屏幕光打脸 |
-| 06 | `06_trench` | 上甘岭战前交通壕 | 19-46 | 1952-10，灰蒙蒙 | 灰绿 + 土黄（★ `trench_wide_v02` 调色锁定） |
+| 06 | `06_trench` | 上甘岭战前交通壕 | 19-46 | 1952-10，深秋有太阳 | 枯黄 + 土褐（★ `trench_wide_v04` 深秋调色锁定） |
 | 07 | `07_rice_field` | 安江农校稻田 | 47-74 | 1961-07，烈日 | 稻田绿 + 阳光金黄 |
 | 08 | `08_train_dining` | 高铁餐车一角 | 75-105 | 2020-01-18 夜 | 暖黄车厢 + 窗外夜色 |
 
@@ -325,7 +325,7 @@ payload = json.dumps({
 | 03 教室·白天 | ★ `03_classroom_day/classroom_day_wide_v01.png` | 1920×1080 | 豆包图生图（源：用户教室白天照） |
 | 04 教室·傍晚 | ★ `04_classroom_dusk/classroom_dusk_wide_v01.png` | 1920×1080 | 豆包图生图。**镜 15 小样素材** |
 | 05 教室·夜晚 | ★ `05_classroom_night/classroom_night_wide_v01.png` | 1920×1080 | 豆包图生图（一台发光笔记本提供冷光源） |
-| 06 战壕 | ★ `06_trench/trench_wide_v02.png`（v01 弃用） | 1280×720 | `z_image_turbo_t2i` seed **3001** ＋**调色锁定**（线性增益 R×0.93 / G×1.05 / B×0.995 → 土壁 G/R 0.946→**1.068**；脚本 `OUTPUT/_diag_grade_trench.py`，报告 `_trench_grade.json`） |
+| 06 战壕 | ★ `06_trench/trench_wide_v04.png`（v01/v02/v03 弃用） | 1280×720 | `z_image_turbo_t2i` seed **3001** ＋**深秋调色锁定**（v02 灰绿版 → 暖化：GAIN(1.050,1.000,0.985)/γ0.900/HI0.120 ⇒ 全图 R−B 12.9→**24.4**、G/R 1.083→**1.0005**，地面亮度 54→64；脚本 `OUTPUT/_diag_grade_trench_autumn.py`，报告 `_trench_autumn_grade.json`）。★ 起因：镜 21 出「绿油油的夏天」= H3 照抄灰绿参考图（README §6.10.3 锚点冲突） |
 | 07 稻田 | ★ `07_rice_field/rice_field_wide_v01.png` | 1280×720 | `z_image_turbo_t2i` seed **3002** |
 | 08 餐车 | ★ `08_train_dining/train_dining_wide_v01.png` | 1280×720 | `z_image_turbo_t2i` seed **3003** |
 
