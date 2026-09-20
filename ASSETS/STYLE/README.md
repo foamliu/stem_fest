@@ -9,7 +9,7 @@
 |--------|------|
 | `style_key_real_v01.png` | 全片风格母版：**超写实真人质感**、人物面部风格、比例 |
 | `style_lut_warm_v01.png` | 序幕一/二 暖金色调 LUT 参考 |
-| `style_lut_greygreen_v01.png` | 第一幕 上甘岭 灰绿土黄 |
+| `style_lut_greygreen_v01.png` | 第一幕 上甘岭 冷灰蓝 + 焦土褐（2026-09-20 起为**风雪阴冷**口径） |
 | `style_lut_goldengreen_v01.png` | 第二幕 稻田 绿 + 金黄 |
 | `style_lut_amber_night_v01.png` | 第三幕 餐车 暖黄 + 夜色 |
 | `style_lut_deepblue_orange_v01.png` | 尾声 教室 深蓝 + 橙红 |

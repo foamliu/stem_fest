@@ -112,6 +112,13 @@ def face_check(paths, min_px=FACE_MIN_PX):
 
 # ★ 例外：这组**不要用拼版覆盖** —— 现行图是用户提供的宽幅真人合影（v02），质量优于拼版。
 #     key = slug，value = 现行文件名（相对 _group/）。脚本对它们只报告、不写文件。
+# ⚠️ 2026-09-20 修正：**保护项必须校验目标文件是否真的存在**。
+#    历史 bug：`four_students_huang_jiguang` 的保护值指向一个**磁盘上从来没有的**文件
+#    （`--list` 早就在打印「⚠️ 用户版缺失」），但 `--all` 仍然直接跳过 ⇒
+#      · 一直生不出 `four_students_huang_jiguang_hero_v01.png`
+#      · 连带 6 个镜（24/27/29/33/40/45）ref1 全部缺失、**根本跑不了**
+#    根因与 README §6.10.17 F4 同源：**文档/配置里承诺的东西要落盘核对**。
+#    ⇒ 现在 `is_protected()` 检查文件存在性；不存在则**视为未保护**，正常走拼版。
 KEEP_USER_SUPPLIED = {
     "four_students": "four_students_hero_v02.png",
     "four_students_huang_jiguang": "four_students_huang_jiguang_hero_v01.png",
@@ -121,6 +128,17 @@ KEEP_USER_SUPPLIED = {
     "girl_mother": "girl_mother_hero_v01.png",
     "liu_sicheng_zhang_shuyang": "liu_sicheng_zhang_shuyang_hero_v01.png",
 }
+
+
+def is_protected(slug: str) -> str:
+    """若该组合受保护**且保护文件真实存在**，返回文件名；否则返回空串。"""
+    fn = KEEP_USER_SUPPLIED.get(slug)
+    if not fn:
+        return ""
+    if os.path.isfile(os.path.join(GROUP, fn)):
+        return fn
+    print("[warn] %s 的保护文件 %s **不存在** ⇒ 取消保护，走拼版" % (slug, fn))
+    return ""
 
 
 def _load_crop(name):
@@ -184,11 +202,10 @@ def main():
         out = os.path.join(GROUP, slug + "_hero_v01.png")
         tag = "%-38s" % slug
 
-        # ★ 用户提供的宽幅合影优先，不被拼版覆盖
-        if slug in KEEP_USER_SUPPLIED:
-            cur = os.path.join(GROUP, KEEP_USER_SUPPLIED[slug])
-            state = "KEEP  用户提供版在场" if os.path.isfile(cur) else "KEEP  ⚠️ 用户版缺失：" + KEEP_USER_SUPPLIED[slug]
-            print("%s %s（要强制拼版请先手动删掉用户版）" % (tag, state))
+        # ★ 用户提供的宽幅合影优先，不被拼版覆盖（**仅当文件真实存在**）
+        pfn = is_protected(slug)
+        if pfn:
+            print("%s KEEP  用户提供版在场：%s（要强制拼版请先手动删掉用户版）" % (tag, pfn))
             keep += 1
             continue
 

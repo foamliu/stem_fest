@@ -185,6 +185,17 @@ def main():
         dsky_rb = (nsm[0] - nsm[2]) - (osm[0] - osm[2])
         print("  中景亮度 %+.1f ｜ 中景 R-B %+.1f ｜ 天空 R-B %+.1f"
               % (dmid_lum, dmid_rb, dsky_rb))
+        # 白屏/近白过渡镜（如镜 46 白屏日记）：画面本就纯白，R-B 恒为 0，
+        # 本脚本的「暖化」指标在此**不适用**，不能判 PASS 也不能判 CHECK。
+        # 判据：新旧两版中景亮度都 > 200 且三通道差 < 6（纯白特征）。
+        def _is_white(rgb):
+            return min(rgb) > 200 and (max(rgb) - min(rgb)) < 6
+        if _is_white(ogm) and _is_white(ngm):
+            print("  判定：N/A 白屏过渡镜（中景 %d/%d/%d ≈ 纯白）—— "
+                  "本镜画面即白底字幕，暖化指标不适用，请改用字幕/文字核对"
+                  % tuple(int(v) for v in ngm))
+            skipped += 1
+            continue
         # 硬条件：中景 R-B 升高（更暖）。天空带只作软条件 —— 低角度/特写镜
         # 顶部往往不是天空而是背景景物，R-B 天然会降，不应据此判 CHECK。
         if dmid_rb > 0:
