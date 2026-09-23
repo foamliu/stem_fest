@@ -122,7 +122,7 @@ python mcp_server/selftest.py
 
 > 用 `image_edit_longcat`，参考图 `ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_hero_v01.png`，
 > prompt："同一位初中女生坐在傍晚 6 点的教室课桌前，暖金色天光，中景" + `ASSETS/STYLE/README.md` 的风格后缀，
-> seed 固定 1101，输出到 `OUTPUT/04_classroom_dusk/frames`。
+> seed 固定 1101，输出到 `OUTPUT/03_classroom_day/frames`（目录名沿用场景目录；2026-09-21 前为 `04_classroom_dusk`）。
 > 🔒 **铁律（2026-09-13，美术方定案）：图生图一律用 `image_edit_longcat`，只用这一个工具、不做 A/B 比较。**
 > **换背景 / 改色调 / 转老照片也走它的图生图**，不要退回去用文生图重新抽卡。
 > （🚫 `image_edit_firered` 工具**已于 2026-09-13 从工具列表删除**：5/5 纯黑图、零成功率。）
