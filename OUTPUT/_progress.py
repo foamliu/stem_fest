@@ -7,7 +7,7 @@ import subprocess
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIRS = [("01_paper_plane", 1, 9), ("04_classroom_dusk", 10, 18),
+DIRS = [("01_paper_plane", 1, 9), ("03_classroom_day", 10, 18),
         ("06_trench", 19, 46), ("07_rice_field", 47, 74),
         ("08_train_dining", 75, 105), ("05_classroom_night", 106, 126)]
 

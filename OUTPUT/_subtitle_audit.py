@@ -24,8 +24,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "OUTPUT")
 DIR = os.path.join(OUT, "_subtitle_audit")
 
-# ★ 必须与各幕脚本的 OUT_ROOT 一致（act2→04_classroom_dusk 是历史命名，勿猜）
-ACTS = ["01_paper_plane", "04_classroom_dusk", "06_trench",
+# ★ 必须与各幕脚本的 OUT_ROOT 一致（act2→03_classroom_day 是 2026-09-21 目录合并后的口径，勿猜）
+ACTS = ["01_paper_plane", "03_classroom_day", "06_trench",
         "07_rice_field", "08_train_dining", "05_classroom_night"]
 
 # R1 命中（NO_SPEECH 指令块）—— 本次抽检重点

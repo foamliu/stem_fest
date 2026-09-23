@@ -41,7 +41,7 @@ STATE = os.path.join(OUT, "_resume_state.txt")
 PREFIX_ACT = {
     "act0": "01_paper_plane",
     "act1": "06_trench",
-    "act2": "04_classroom_dusk",
+    "act2": "03_classroom_day",
     "act3": "07_rice_field",
     "act4": "08_train_dining",
     "act5": "05_classroom_night",

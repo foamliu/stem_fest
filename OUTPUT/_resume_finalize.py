@@ -36,7 +36,7 @@ STATE = os.path.join(OUT, "_resume_state.txt")
 ACTS = {
     "_diag_act0_plane.py": "01_paper_plane",
     "_diag_act1_trench.py": "06_trench",
-    "_diag_act2_startup.py": "04_classroom_dusk",
+    "_diag_act2_startup.py": "03_classroom_day",
     "_diag_act3_rice.py": "07_rice_field",
     "_diag_act4_train.py": "08_train_dining",
     "_diag_act5_finale.py": "05_classroom_night",

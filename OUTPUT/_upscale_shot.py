@@ -32,7 +32,7 @@ W, H, FPS = 1056, 608, 24
 # 幕目录映射（与 _concat_video.py 保持一致）
 ACT_DIRS = {
     "01_paper_plane": (1, 9),
-    "04_classroom_dusk": (10, 18),
+    "03_classroom_day": (10, 18),
     "06_trench": (19, 46),
     "07_rice_field": (47, 74),
     "08_train_dining": (75, 105),

@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUT = ROOT / "OUTPUT"
 DATA = OUTPUT / "_audit_data.json"
 REPORT = OUTPUT / "_AUDIT_5_6_7.md"
-ACTS = ["01_paper_plane", "02_campus", "04_classroom_dusk", "05_classroom_night",
+ACTS = ["01_paper_plane", "02_campus", "03_classroom_day", "05_classroom_night",
         "06_trench", "07_rice_field", "08_train_dining"]
 
 # ── 复用 MCP 服务里的工具函数（保证与生产路径完全一致）──

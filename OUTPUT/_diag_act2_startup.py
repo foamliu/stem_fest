@@ -6,8 +6,17 @@
 路线（与序幕一一致，README §7）：
   · 有角色的镜 → `video_minimax_h3_r2v`
       ref_image_1 = 角色/合影参考图 → `<Picture 1>`
-      ref_image_2 = `SCENES/04_classroom_dusk/classroom_dusk_wide_v01.png` → `<Picture 2>`
+      ref_image_2 = `SCENES/03_classroom_day/classroom_day_wide_v01.png` → `<Picture 2>`
         （傍晚 6 点教室，**暖金色天光 + 蓝紫冷光**）
+
+★ 2026-09-21 场景目录合并（用户指令：**「故事开始就是现实世界的下午 6 点，本来就是 dusk，
+  没必要分三个场景，过于冗余」**）：
+  `SCENES/04_classroom_dusk/` **已物理删除**，序幕二改用 `03_classroom_day/classroom_day_wide_v01.png`。
+  理由：`03`（白天）/ `04`（傍晚）本是**同一间教室的两种光**，拆成两套图的唯一代价是
+  **跨幕光线一致性风险**（序幕二镜 10-18 与尾声镜 106-126 是同一间教室、现实只隔一小会儿）。
+  合并后全片教室只有两种光：`03` = 傍晚 6 点天还亮（暖金）/ `05` = 夜（深蓝 + 橙红）。
+  ⇒ **本轮重跑输出目录一并从 `04_classroom_dusk/` 改为 `03_classroom_day/`**，
+    与 `ASSETS/SCENES/` 严格对齐，不再留孤儿目录。
 
 ★ 参考图纪律（2026-09-13 修正 —— 用户反馈「说话时背景没人了」）：
   **多人场景（同一空间）里的「单人说话镜」，参考图不能只给说话人一张脸** ——
@@ -48,7 +57,7 @@ COMFY = "http://127.0.0.1:8188"
 COMFY_OUT = r"E:\code\ComfyUI\output"
 COMFY_IN = r"E:\code\ComfyUI\input"
 WORKFLOW_DIR = os.path.join(ROOT, "workflows")
-OUT_ROOT = os.path.join(ROOT, "OUTPUT", "04_classroom_dusk", "video")
+OUT_ROOT = os.path.join(ROOT, "OUTPUT", "03_classroom_day", "video")
 REPORT = os.path.join(ROOT, "OUTPUT", "_act2_startup_report.txt")
 CLIENT_ID = "act2v_startup"
 
@@ -64,7 +73,15 @@ LIGHT = (
     "与全息设备发出的蓝紫色冷光交叠，画面是暖金与蓝紫的对比色调、层次分明"
 )
 
-SCENE = os.path.join(SCENES, "04_classroom_dusk", "classroom_dusk_wide_v01.png")
+# ★ 定版 = v01（2026-09-21 用户指令：「如果非要选一张，那就第一张」）。
+#   v01~v05 五张实测都是**同一间教室的不同视角**（差异在机位/景别，不在光线与陈设），
+#   全套「傍晚 6 点、天还亮、暖金光」基调一致 —— 所以定版依据是**机位**而非光色：
+#   v01 = 正对讲台的**标准全景**（后墙板报 + 左窗 + 右窗日落三面信息都在），
+#         与镜 10-18「全班在全息设备前启动」的**多人调度**最合；
+#   v04 = 从走廊隔窗拍的**外视角**（画面被窗框切分），做「隔窗看教室」的镜才用得上；
+#   v02/v03/v05 = 更偏近/更偏侧的中景与侧视。
+#   ⚠️ 与 `06_trench` 同理：**这里写死 v01，改素材必须改这一行**，否则等于没换素材。
+SCENE = os.path.join(SCENES, "03_classroom_day", "classroom_day_wide_v01.png")
 
 # ── 角色参考图 ────────────────────────────────────────────
 P_LIU_SIQI = os.path.join(FRAMES, "01_liu_siqi", "liu_siqi_hero_v01.png")

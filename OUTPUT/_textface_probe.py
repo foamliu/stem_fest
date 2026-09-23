@@ -29,7 +29,7 @@ import numpy as np
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DIRS = ["01_paper_plane", "04_classroom_dusk", "05_classroom_night",
+DIRS = ["01_paper_plane", "03_classroom_day", "05_classroom_night",
         "06_trench", "07_rice_field", "08_train_dining", "02_campus"]
 SKIP = ("_mid_", "_bak_", "_v2bak_", "_rejected")
 

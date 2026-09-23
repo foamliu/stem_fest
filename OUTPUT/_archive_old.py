@@ -20,6 +20,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIRS = ["01_paper_plane", "04_classroom_dusk", "06_trench",
+        # ⚠️ 2026-09-21：`_archive_old.py` 是**归档脚本**，它读的是历史目录布局，
+        #    故此处**故意保留** `04_classroom_dusk` —— 删它会让旧产物无法再被归档。
+        #    `OUTPUT/04_classroom_dusk/` 已于 2026-09-21 迁到 `03_classroom_day/`（见 `_migrate_04_to_03.py`），
+        #    本行仅用于「万一还有 04 时代的备份残留」的兜底。
         "07_rice_field", "08_train_dining", "05_classroom_night"]
 
 

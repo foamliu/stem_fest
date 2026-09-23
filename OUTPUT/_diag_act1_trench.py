@@ -6,7 +6,7 @@
    全片映射（见 `_diag_act3_rice.py` 文首）：
 
        序幕一《纸飞机》  镜 1-9    → 01_paper_plane     (_diag_plane_plane_videos.py)
-       序幕二《启动》    镜 10-18  → 04_classroom_dusk  (_diag_act2_startup.py)
+       序幕二《启动》    镜 10-18  → 03_classroom_day (_diag_act2_startup.py)
        第一幕《上甘岭》  镜 19-46  → 06_trench          ← ★ 本脚本
        第二幕《禾下乘凉》镜 47-74  → 07_rice_field      (_diag_act3_rice.py)
 

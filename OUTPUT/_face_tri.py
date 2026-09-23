@@ -26,7 +26,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "OUTPUT")
 ASSETS = os.path.join(ROOT, "ASSETS")
 
-ACTS = ["01_paper_plane", "04_classroom_dusk", "06_trench", "07_rice_field",
+ACTS = ["01_paper_plane", "03_classroom_day", "06_trench", "07_rice_field",
         "08_train_dining", "05_classroom_night"]
 
 

@@ -23,7 +23,7 @@ REFS = os.path.join(OUT, "_shot_refs.json")
 # 权威表：幕脚本 → (输出目录, 镜号区间)
 ACTS = [
     ("_diag_act0_plane.py",    "01_paper_plane",   (1, 9)),
-    ("_diag_act2_startup.py",  "04_classroom_dusk", (10, 18)),
+    ("_diag_act2_startup.py",  "03_classroom_day", (10, 18)),
     ("_diag_act1_trench.py",   "06_trench",        (19, 46)),
     ("_diag_act3_rice.py",     "07_rice_field",    (47, 74)),
     ("_diag_act4_train.py",    "08_train_dining",  (75, 105)),

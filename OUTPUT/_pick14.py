@@ -22,7 +22,7 @@ import sys
 import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIR = os.path.join(ROOT, "OUTPUT", "04_classroom_dusk", "video")
+DIR = os.path.join(ROOT, "OUTPUT", "03_classroom_day", "video")
 SLUG = "zhang_defends_himself"
 CROP = "crop=iw:150:0:ih-170"
 

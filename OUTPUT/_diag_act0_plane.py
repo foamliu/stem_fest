@@ -6,7 +6,7 @@
    脚本名用 `act0_plane`。全片映射：
 
        序幕一《纸飞机》  镜 1-9    → 01/02/03 场景   ← ★ 本脚本
-       序幕二《启动》    镜 10-18  → 04_classroom_dusk  (_diag_act2_startup.py)
+       序幕二《启动》    镜 10-18  → 03_classroom_day (_diag_act2_startup.py)
        第一幕《上甘岭》  镜 19-46  → 06_trench          (_diag_act1_trench.py)
        第二幕《禾下乘凉》镜 47-74  → 07_rice_field      (_diag_act3_rice.py)
        第三幕《餐车》    镜 75-105 → 08_train_dining    (_diag_act4_train.py)

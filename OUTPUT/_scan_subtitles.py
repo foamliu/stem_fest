@@ -21,7 +21,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "OUTPUT")
 
-DIRS = ["01_paper_plane", "04_classroom_dusk", "06_trench",
+DIRS = ["01_paper_plane", "03_classroom_day", "06_trench",
         "07_rice_field", "08_train_dining", "05_classroom_night"]
 
 

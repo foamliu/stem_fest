@@ -111,13 +111,13 @@ megapixels: 1.5     # → 1680×944
 steps: 50
 cfg: 4.5
 guidance: 4.5
-output_dir: OUTPUT/04_classroom_dusk/frames
+output_dir: OUTPUT/03_classroom_day/frames
 # 产物：mirror015_liu_siqi_v11_refc15_00001_.png（1680×944，实测脸高 255 px）
 
 # ② 出视频（★ 本项目统一用 R2V，不用 I2V；音频在这一步就生成）
 tool: video_minimax_h3_r2v
 ref_image_1: ASSETS/CHARACTERS/01_liu_siqi/liu_siqi_closeup_v02_16x9.png   # → prompt 里写 <Picture 1>
-ref_image_2: ASSETS/SCENES/04_classroom_dusk/classroom_dusk_wide_v01.png   # → prompt 里写 <Picture 2>
+ref_image_2: ASSETS/SCENES/03_classroom_day/classroom_day_wide_v01.png   # → prompt 里写 <Picture 2>（原 04_classroom_dusk，2026-09-21 合并）
 prompt: |
   CUT 1: 近景半身。<Picture 1> 中的这位初中女生坐在傍晚的教室里，环境与光线参考 <Picture 2>：
   暖金色天光从窗外斜照进来，室内有淡淡蓝紫色冷光反光，课桌椅整齐。
@@ -128,7 +128,7 @@ duration: 5
 seed: 1101
 aspect_ratio: 16:9 (Widescreen)
 megapixels: 0.6      # 实测输出 1056x608@24fps + AAC 32kHz 立体声（199 s）
-output_dir: OUTPUT/04_classroom_dusk/video
+output_dir: OUTPUT/03_classroom_day/video
 # 产物：mirror015_liu_siqi_r2v_00001_.mp4（5.17 s）
 # ⚠️ 台词是否真的念出来、音色是否合适，本地无 ASR，只能靠耳朵听
 
@@ -193,7 +193,7 @@ output_dir: OUTPUT/tts
 
 ### 6.6 R2V 直出视频（★ 本项目统一路线，I2V 弃用）
 
-镜 15 实测（`video_minimax_h3_r2v`：`ref_image_1` = 定版 16:9 单人图、`ref_image_2` = `04_classroom_dusk` 场景图；
+镜 15 实测（`video_minimax_h3_r2v`：`ref_image_1` = 定版 16:9 单人图、`ref_image_2` = `03_classroom_day` 场景图（当时为 `04_classroom_dusk`，2026-09-21 合并）；
 `seed 1101` / `megapixels 0.6` / `steps 4` / `duration 5` → **199 s**）：
 
 | 环节 | 尺寸 | 输出画面脸高 |

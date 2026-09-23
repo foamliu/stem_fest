@@ -19,7 +19,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIRS = ["01_paper_plane", "04_classroom_dusk", "06_trench", "07_rice_field"]
+DIRS = ["01_paper_plane", "03_classroom_day", "06_trench", "07_rice_field"]
 MANIFEST = os.path.join(ROOT, "OUTPUT", "_cleaned_old_videos.txt")
 
 

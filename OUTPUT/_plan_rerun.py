@@ -31,11 +31,12 @@ OUT = os.path.join(ROOT, "OUTPUT")
 # 幕目录 → 脚本
 # ★ 幕目录 → 脚本（**必须与脚本里的 OUT_ROOT 一致**，勿凭语义猜测）
 #   核对来源：各脚本 OUT_ROOT = os.path.join(ROOT, "OUTPUT", "<dir>", "video")
-#   注意 act2 输出到 04_classroom_dusk（与 act1 的 06_trench 一样是"命名不直观"的历史遗留）
+#   注意 act2 输出到 03_classroom_day（2026-09-21 `04_classroom_dusk` 目录删除后已改；
+#   与 act1 的 06_trench 一样，脚本名 act<N> 与幕序并不直观对应）
 ACTS = [
     ("01_paper_plane", "_diag_act0_plane.py"),
     ("06_trench", "_diag_act1_trench.py"),
-    ("04_classroom_dusk", "_diag_act2_startup.py"),
+    ("03_classroom_day", "_diag_act2_startup.py"),
     ("07_rice_field", "_diag_act3_rice.py"),
     ("08_train_dining", "_diag_act4_train.py"),
     ("05_classroom_night", "_diag_act5_finale.py"),

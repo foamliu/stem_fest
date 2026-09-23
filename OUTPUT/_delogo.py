@@ -44,7 +44,7 @@ def _box(scale=1.0):
 # 泄漏镜 → (幕目录, 片名 slug, 自定义 box 或 None 用默认)
 SHOTS = {
     7:   ("01_paper_plane", "xu_changjing_liu_siqi_glance", None),
-    14:  ("04_classroom_dusk", "zhang_defends_himself", None),
+    14:  ("03_classroom_day", "zhang_defends_himself", None),
     21:  ("06_trench", "zhang_crouches_looks_at_wild_veg", None),
     36:  ("06_trench", "young_soldier_relieved_huang_smiles", None),
     77:  ("08_train_dining", "xu_looks_at_the_elder", None),

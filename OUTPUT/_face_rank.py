@@ -33,7 +33,7 @@ ASSETS = os.path.join(ROOT, "ASSETS", "CHARACTERS")
 PY = ["py", "-3.10"]
 VENV = r"E:\code\ComfyUI\venv\Scripts\python.exe"
 
-ACTS = ["01_paper_plane", "04_classroom_dusk", "06_trench", "07_rice_field",
+ACTS = ["01_paper_plane", "03_classroom_day", "06_trench", "07_rice_field",
         "08_train_dining", "05_classroom_night"]
 
 # 角色目录 → 代表定妆照（优先 closeup/hero 里**脸最大**的那张，脚本内自动选）
