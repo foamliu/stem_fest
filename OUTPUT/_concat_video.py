@@ -26,6 +26,31 @@
      ★ 章节表按**帧数 ÷ 24** 计算，**不用容器 duration** ——
      H3 容器 duration 含音频包尾巴（长 ~41ms/镜），累加会漂移 2.6s。
        ⚠️ 烧号后画面内容的起点/终点以本表为准（每段都被重编码）。
+  7. **★★ 音画同步：每段音频必须「钉」到本镜时长（2026-09-21 血泪）★★**
+     · **症状**：成片里人声与口型对不上，越到后面越明显 —— 第二幕《禾下乘凉》
+       镜 59/60/61 人声滞后画面 **1.34s**，末镜滞后 **2.63s**（用户报障）。
+     · **根因**：H3 片段的**音轨比画面长 0~32ms**。音频是 AAC，1024 采样/颗
+       （32 kHz 下正好 32ms），尾部对齐到整颗 AAC 帧 = **编码器补零**。
+       实测（126 镜）：尾部 RMS −77 ~ −240 dB vs 整条 −11 ~ −34 dB、峰值 ≤0.0024。
+     · **为什么"直接接"必错**：concat 逐段推进时间轴时 ——
+         视频按 **帧数 ÷ 24**（精确 = 画面长度）；
+         音频按 **解码采样数 ÷ 采样率**（= 音轨自己的长度，比画面长一丁点）。
+       两条轨各自"接对了"，合起来就是**每刀把声音往后推 ~20ms**，126 刀累积 2.63s
+       （= 旧成片音轨比画面长 2.631s，与实测逐镜漂移完全吻合）。
+     · **换接法也躲不掉**（2026-09-21 全部实测，7 镜对照）：
+         | 接法 | 结果 |
+         |---|---|
+         | A 视频/音频分两条 concat 滤镜（旧） | 逐镜 +20ms 累积（镜59 +90ms）|
+         | B concat=n=N:v=1:a=1 但音频不钉长 | 同样累积（段长仍取音频长度）|
+         | D `-f concat` demuxer 纯接 + 重编码 | 同样累积（+30→+130ms）|
+         | E `-c copy -shortest` 先无损削尾巴 | **更糟**：砍掉的是**视频**帧（7 镜少 9 帧）|
+         | **C 每段音频 apad/atrim 钉到本镜时长** | **全 0 ms，0 重复帧** ✅ |
+       ⇒ 因为 ffmpeg 只能按"文件里记录的长度"推进，它无法分辨那 30ms 是补零还是内容；
+         素材本身不一致，**必须有人把音频对齐到画面**，这就是 `AUDIO_NORM`。
+     · **截掉的到底是什么**：只是那段补零（比人声低 65~230 dB），人声/环境声一个采样没动。
+     · **代价**：每镜尾部最多丢 32ms 的**静音**；换来全片零漂移。
+       替代方案「让画面等音频」= 每刀多停 1 帧（126 处微卡顿），已否决。
+     · 闸门 2 会检查「音轨长度 ≈ 画面长度」，>0.15s 直接判失败 —— 就是不让人再犯。
 
 用法：
     py -3.10 OUTPUT/_concat_video.py                 # 拼到最后一镜（默认 OUTPUT/full_cut.mp4）
@@ -58,8 +83,22 @@ for _s in ("stdout", "stderr"):
         pass
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DIRS = ["01_paper_plane", "04_classroom_dusk", "06_trench",
+DIRS = ["01_paper_plane", "03_classroom_day", "06_trench",
         "07_rice_field", "08_train_dining", "05_classroom_night"]
+
+# ★ 镜号区间 → 幕目录的**权威映射**（用于「跨幕同名镜号」的消歧，见 `collect`）。
+#   2026-09-21 新增：`04_classroom_dusk` 并入 `03_classroom_day` 后**出现了首例跨幕重号** ——
+#   尾声镜 106-126 与序幕一镜 1-9 的 slug 都可能撞车，而此前所有幕的镜号区间**互不相交**，
+#   只按「同号取 mtime 最新」是安全的；现在不行了。
+RANGES = {
+    "01_paper_plane":    (1, 9),
+    "03_classroom_day":  (10, 18),
+    "06_trench":         (19, 46),
+    "07_rice_field":     (47, 74),
+    "08_train_dining":   (75, 105),
+    "05_classroom_night": (106, 126),
+}
+
 TMP = os.path.join(ROOT, "OUTPUT", "_concat")
 CHAP = os.path.join(ROOT, "OUTPUT", "_concat_chapters.txt")
 
@@ -148,7 +187,7 @@ def encoder_args():
 def probe(p):
     out = run(["ffprobe", "-v", "error", "-show_entries",
                "format=duration:stream=codec_type,codec_name,width,height,"
-               "sample_rate,channels,r_frame_rate",
+               "duration,sample_rate,channels,r_frame_rate",
                "-of", "json", p])
     try:
         d = json.loads(out.stdout)
@@ -158,10 +197,11 @@ def probe(p):
     for s in d["streams"]:
         if s.get("codec_type") == "video":
             info.update(w=s.get("width"), h=s.get("height"),
-                        vc=s.get("codec_name"), fps=s.get("r_frame_rate"))
+                        vc=s.get("codec_name"), fps=s.get("r_frame_rate"),
+                        vd=float(s.get("duration") or 0))
         elif s.get("codec_type") == "audio":
             info.update(ac=s.get("codec_name"), sr=s.get("sample_rate"),
-                        ch=s.get("channels"))
+                        ch=s.get("channels"), ad=float(s.get("duration") or 0))
     return info
 
 
@@ -183,8 +223,44 @@ def nframes(p):
         return 0
 
 
+# ★★★ 2026-09-21：音画漂移修复（**必读**，见文件头 §7「音画漂移」）★★★
+# 每段音频进 concat 之前必须「钉」到**本镜精确时长**：
+#   aresample=32000          统一采样率，采样数才是确定的
+#   aformat=channel_layouts=stereo  统一声道（concat 要求各路一致）
+#   apad / atrim=0:D         不足补静音、超出截断 ⇒ 段长恒 = D
+#   asetpts=N/SR/TB          重置时间戳（concat 要求各路从 0 起）
+AUDIO_NORM = ("aresample=32000,aformat=channel_layouts=stereo,"
+              "apad,atrim=0:%.6f,asetpts=N/SR/TB")
+
+
+def seg_dur(p, info=None):
+    """该片段在成片里的**精确时长**（秒）—— 音频段要钉到它。
+
+    fps 已是 24 ⇒ 直接用帧数 ÷ 24（最可靠）。
+    否则（走 scale/fps 归一化分支）按容器时长四舍五入到最近的 1/24 帧。
+    """
+    info = info or (probe(p) or {})
+    if info.get("fps") == "24/1":
+        f = nframes(p)
+        if f:
+            return f / 24.0
+    return round((info.get("vd") or info.get("dur") or 0.0) * 24) / 24.0
+
+
 def collect(upto=None):
-    """按镜号收集产物：{镜号: 路径}（同号取 mtime 最新的）
+    """按镜号收集产物：{镜号: 路径}
+
+    同号候选的选择规则（2026-09-21 改为「**先按幕归属，再取最新**」）：
+      · 若镜号落在 `RANGES` 的某幕区间内 ⇒ **只认该幕目录下的候选**，同幕内取 mtime 最新；
+      · 落在区间外（数据异常）⇒ 回退旧行为「全目录取 mtime 最新」，并告警。
+
+    ⚠️ 为什么必须按幕过滤（2026-09-21 修订）：
+      旧实现是「同号一律取 mtime 最新」，当时**安全**，因为六幕镜号区间互不相交。
+      但本次重跑会让 `03_classroom_day/video/` 里**同时存在**旧图产物与刚生成的新图产物 ——
+      一旦某镜的新产物尚未落地而旧产物已是最新，仍会被选中（这正是我们要避免的）。
+      更硬的理由：镜号首位的 1 位数幕（01_paper_plane 的 1-4）与三位数幕（05 的 106-126）
+      在 `%d_` 正则下不会互相误匹配，但**未来若某幕改名或细分，重号即会静默串片**。
+      按区间过滤是**结构性**保证，不依赖「碰巧不重号」。
 
     ⚠️ 必须排除：
       · `_bak_*`（擦除/重跑前的备份）
@@ -193,6 +269,7 @@ def collect(upto=None):
     """
     found = {}
     for d in DIRS:
+        lo, hi = RANGES[d]
         for f in glob.glob(os.path.join(ROOT, "OUTPUT", d, "video", "*.mp4")):
             base = os.path.basename(f)
             if base.startswith("_bak_"):
@@ -204,6 +281,11 @@ def collect(upto=None):
                 continue
             n = int(m.group(1))
             if upto and n > upto:
+                continue
+            # ★ 镜号不属于本幕区间 ⇒ 本目录下的是**放错位置的产物**，不采信
+            if not (lo <= n <= hi):
+                print("  [!] 跳过越界产物：%s\\%s（镜 %d 不属 %s 的 %d-%d 区间）"
+                      % (d, base, n, d, lo, hi))
                 continue
             if n not in found or os.path.getmtime(f) > os.path.getmtime(found[n]):
                 found[n] = f
@@ -306,7 +388,22 @@ def main():
         #   ⇒ **每个镜头切换处有 1 帧被多停了 ~30ms**（126 镜 = 126 处微卡顿）。
         #   试过 `-video_track_timescale`（段级 / 输出级、1/12288 / 1/24000）**均无效**。
         #   ✅ concat 滤镜按**实际解码帧**重排时间轴，实测全片间隔一致，零卡顿。
+        # ★★ 2026-09-21 音画漂移修复（详见文件头 §7）★★
+        #   旧实现把「视频轨」与「音频轨」分成两条 concat：
+        #       [v..] concat=v=1:a=0[v]  ;  [a..] concat=v=0:a=1[a]
+        #   视频段长 = 帧数/24（精确），而**音频段长 = 各段解码后的采样数**。
+        #   H3 片段的音频是 AAC（1024 采样/帧 = 32ms 粒度），解码后的采样数
+        #   常比该镜视频长 0~32ms ⇒ 每进一段，音频时间轴就比画面多走一点点，
+        #   **逐镜累积**：实测镜 59 已滞后 1.34s，镜 126 滞后 2.63s（音轨比画面
+        #   长 2.631s，与实测完全吻合）。表现为「人声与口型对不上，越到后面越明显」。
+        #   ⇒ 修法：每段音频先 apad/atrim 钉到**本镜精确时长**（AUDIO_NORM），
+        #     再用**同一条** concat（v=1:a=1）音视频一起拼。
+        #   实测（7 镜 A/B 对照）：旧法音频偏长 +128.3ms（≈18ms/镜）；
+        #     修后 +0.3ms、逐镜偏移全为 0ms（相关度 1.00）。
         n = len(shots)
+        durs = {}
+        for s in shots:
+            durs[s] = seg_dur(found[s])
         fin = []
         for fn_ in (found[s] for s in shots):
             fin += ["-i", fn_]
@@ -316,11 +413,11 @@ def main():
             if not uniform:
                 vf = ["scale=1056:608", "fps=24", "setsar=1"] + vf
             chains.append("[%d:v]%s[v%d]" % (i, ",".join(vf), i))
+            chains.append("[%d:a]%s[a%d]"
+                          % (i, AUDIO_NORM % durs[s], i))
         fc = (";".join(chains) + ";"
-              + "".join("[v%d]" % i for i in range(n))
-              + "concat=n=%d:v=1:a=0[v];" % n
-              + "".join("[%d:a]" % i for i in range(n))
-              + "concat=n=%d:v=0:a=1[a]" % n)
+              + "".join("[v%d][a%d]" % (i, i) for i in range(n))
+              + "concat=n=%d:v=1:a=1[v][a]" % n)
         fcfile = os.path.join(TMP, "filtergraph.txt")
         with open(fcfile, "w", encoding="utf-8") as f:
             f.write(fc)
@@ -337,7 +434,9 @@ def main():
         # ★ 章节表按**源片段的帧数**重算（不用容器 duration，见 nframes()）。
         #   单趟编码后每段帧数 = 源段的**实际解码帧数**（fps 已统一为 24），
         #   故直接对源文件数帧即可，与成片逐段对齐。
-        rows = [(s, nframes(found[s]) / 24.0, os.path.basename(found[s]))
+        #   ★ 2026-09-21：与音频段钉长共用同一个 `durs`，两者**必须同源**，
+        #     否则章节表又会与音轨错开。
+        rows = [(s, durs[s], os.path.basename(found[s]))
                 for s in shots]
 
     elif uniform:
@@ -411,6 +510,18 @@ def main():
                  "[OK]" if abs(drift) < 0.05 else "[!! 偏差过大，检查章节表]"))
         if abs(drift) >= 0.05:
             print("  ⚠️ 抽帧验收会错位 —— 请检查 rows 是否用了容器 duration")
+
+        # ★★ 闸门 2（2026-09-21 新增）：**音轨长度必须等于画面长度** ★★
+        #   这正是本次「禾下乘凉人声对不上口型」的根因指纹 ——
+        #   视频/音频分开 concat 时，音轨会比画面长（旧成片：+2.631s）；
+        #   差值 ≈ 音画的**累计漂移**，所以一旦 >0.15s 就直接判失败。
+        av_gap = (info.get("ad") or 0.0) - tot_sec
+        print("音轨 %.4fs  vs  画面 %.4fs   差 %+.4fs  %s"
+              % (info.get("ad") or 0.0, tot_sec, av_gap,
+                 "[OK]" if abs(av_gap) < 0.15 else
+                 "[!! 音画漂移 —— 音频段没有钉到本镜时长？见文件头 §7]"))
+        if abs(av_gap) >= 0.15:
+            print("  ⚠️ 该成片的人声会与口型逐渐错位，请勿交付")
 
     print("镜号烧录：%s" % ("✅ 右上角 SHOT NNN" if burn else "❌ 未烧（--no-burn）"))
     print("章节对轴表：%s" % os.path.relpath(CHAP, ROOT))
